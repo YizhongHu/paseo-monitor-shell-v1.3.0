@@ -790,9 +790,10 @@ paseo-monitor watch --kind slurm --host cannon --job 24211558
 ```sh
 paseo-monitor watch --kind <kind> [kind args] \
     [--report-to <agent>] [--interval <s>] [--deadline <when>] \
-    [--terminal TOK,TOK] [--report-on TOK,TOK] [--dwell <n-sweeps>] \
-    [--report-transitions] [--context <text>|--context-file <f>] \
-    [--label k=v ...] [--prohibit <text>] [--failsafe] [--max-fires <n>]
+    [--terminal TOK,TOK] [--report-on TOK,TOK] [--report-transitions] \
+    [--with-reason] [--dwell <n-sweeps>] [--context <text>|--context-file <f>] \
+    [--label k=v ...] [--prohibit <text>] [--failsafe] [--max-fires <n>] \
+    [--max-runs <n>] [--expires-in <duration>]
 
 paseo-monitor watch --script <file> --reason "<why no kind fits>" \
     --terminal TOK,TOK [...]
