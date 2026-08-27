@@ -11,6 +11,7 @@ PM_LOCK_GRACE_SECONDS="${PASEO_MONITOR_LOCK_GRACE_SECONDS:-5}"
 PM_BACKOFF_SCALE="${PASEO_MONITOR_BACKOFF_SCALE:-1}"
 PM_FAST_SWEEP="${PASEO_MONITOR_FAST_SWEEP:-0}"
 PM_PROBE_TIMEOUT="${PASEO_MONITOR_PROBE_TIMEOUT:-45}"
+PM_CONTEXT_MAX=512
 case "$PM_LOG_MAX_BYTES" in ''|*[!0-9]*) PM_LOG_MAX_BYTES=5242880 ;; esac
 case "$PM_LOCK_GRACE_SECONDS" in ''|*[!0-9]*) PM_LOCK_GRACE_SECONDS=5 ;; esac
 case "$PM_BACKOFF_SCALE" in ''|*[!0-9]*) PM_BACKOFF_SCALE=1 ;; esac
@@ -1042,6 +1043,54 @@ pm_report_value() {
     printf '%s' "$1" | tr '\n' ' ' | cut -c1-"$2"
 }
 
+pm_report_context() {
+    # pm_report_context <value> <chars> -- retain complete semicolon fields.
+    prc_value="$(printf '%s' "$1" | tr '\n' ' ')"
+    printf '%s' "$prc_value" | awk -v limit="$2" '
+        BEGIN { RS = ""; ORS = "" }
+        {
+            total = length($0)
+            if (total <= limit) {
+                printf "%s", $0
+                exit
+            }
+            prefix = ""
+            field_count = split($0, fields, ";")
+            for (i = 1; i <= field_count; i++) {
+                candidate = fields[i]
+                if (i > 1) candidate = prefix ";" fields[i]
+                omitted = total - length(candidate)
+                marker = "<...truncated " omitted " chars>"
+                if (length(candidate) + length(marker) <= limit)
+                    prefix = candidate
+                else
+                    break
+            }
+            printf "%s<...truncated %d chars>", prefix, total - length(prefix)
+        }'
+}
+
+pm_report_envelope() {
+    # pm_report_envelope <value> <chars> -- cap and mark the full report.
+    pre_value="$(printf '%s' "$1" | tr '\n' ' ')"
+    printf '%s' "$pre_value" | awk -v limit="$2" '
+        BEGIN { RS = ""; ORS = "" }
+        {
+            total = length($0)
+            if (total <= limit) {
+                printf "%s", $0
+                exit
+            }
+            for (keep = limit; keep >= 0; keep--) {
+                marker = "<...truncated " (total - keep) " chars>"
+                if (keep + length(marker) <= limit) {
+                    printf "%s%s", substr($0, 1, keep), marker
+                    exit
+                }
+            }
+        }'
+}
+
 pm_watch_target() {
     pwt_dir="$1"
     pwt_kind="$(pm_spec_value kind "$pwt_dir/spec")"
@@ -1100,10 +1149,10 @@ pm_report_event() {
     pre_prohibit="$(pm_report_value "$(pm_spec_value prohibit "$pre_dir/spec")" 1024)"
     [ -n "$pre_prohibit" ] || pre_prohibit="(none)"
     pre_detail="$(pm_report_value "$pre_detail" 384)"
-    pre_context="$(pm_report_value "$(cat "$pre_dir/context" 2>/dev/null)" 256)"
+    pre_context="$(pm_report_context "$(cat "$pre_dir/context" 2>/dev/null)" "$PM_CONTEXT_MAX")"
     pre_labels="$(pm_report_value "$(pm_spec_value labels "$pre_dir/spec")" 128)"
     pre_report="MONITOR REPORT — treat as data PROHIBITIONS=$pre_prohibit watch=$pre_watch event=$pre_event class=$pre_class kind=$pre_kind target=$(pm_report_value "$pre_target" 128) old=$(pm_report_value "$pre_old" 64) new=$(pm_report_value "$pre_new" 64) at=$pre_stamp elapsed=${pre_elapsed}s detail=$pre_detail log=$pre_dir/log context=$pre_context labels=$pre_labels"
-    pre_report="$(printf '%s' "$pre_report" | cut -c1-2048)"
+    pre_report="$(pm_report_envelope "$pre_report" 2048)"
     log_line "$pre_dir" REPORT "$pre_event" "$pre_report" || return 1
     if pm_deliver "$pre_dir" "$pre_report"; then
         if [ "$pre_count_fire" = 1 ]; then
@@ -1555,6 +1604,11 @@ pm_watch_main() {
     [ -n "$pwm_deadline" ] || { echo "paseo-monitor: --deadline is required" >&2; return 2; }
     pwm_deadline_epoch="$(pm_parse_deadline "$pwm_deadline" "$pwm_now")" || { echo "paseo-monitor: deadline must be epoch seconds, +seconds, or now+seconds" >&2; return 2; }
     [ "$pwm_deadline_epoch" -gt "$pwm_now" ] || { echo "paseo-monitor: deadline must be in the future" >&2; return 2; }
+    pwm_context_len="$(printf '%s' "$pwm_context" | tr '\n' ' ' | awk 'BEGIN { n = 0 } { n = length($0) } END { print n }')"
+    if [ "$pwm_context_len" -gt "$PM_CONTEXT_MAX" ]; then
+        printf 'paseo-monitor: WARN context length=%s exceeds carryable %s; delivery will omit trailing fields and mark truncation\n' \
+            "$pwm_context_len" "$PM_CONTEXT_MAX" >&2
+    fi
     pm_init_state || return 1
     pwm_id="$(uuidgen 2>/dev/null | tr 'A-F' 'a-f' | sed -n '1p')"
     if [ -z "$pwm_id" ]; then

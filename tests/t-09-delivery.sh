@@ -39,6 +39,23 @@ assert_grep "$SANDBOX/delivered.log" 'elapsed=[0-9][0-9]*s' "tool elapsed"
 assert_eq "$(cat "$dir/fires")" 1 "arbitrary delivery counts fire"
 [ ! -e "$dir/undelivered" ] || fail "successful delivery left undelivered flag"
 
+context_prefix='target=committee-a/report.md; item=32e53681-dc50-4dab-9c81-1bdfd66bb7b9; sha=78152c4085a1cfd17dbee90c85b5b3839c3a021d; branch=main; purpose=independent committee analysis of completed 42-row He-v1 eval; next-owner=hev1-eval42-orchestrator relays findings to operator; evidence=artifact:/n/.../results/04_collect/rows.csv; prohibitions=read-only on results/, no scancel'
+context_padding="$(awk -v n="$((568 - ${#context_prefix}))" 'BEGIN { for (i = 0; i < n; i++) printf "x" }')"
+context_value="$context_prefix$context_padding"
+assert_eq "${#context_value}" 568 "context fixture length"
+context_registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'context truncation' --terminal DONE --no-start-report --context "$context_value" --deliver "$SANDBOX/deliver" --deadline +300 2>"$SANDBOX/context-registration.err")" || fail "context registration failed"
+context_id=$(printf '%s\n' "$context_registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
+context_dir="$PM_HOME/watches/$context_id"
+assert_eq "$(cat "$context_dir/context")" "$context_value" "context stored in full"
+assert_grep "$SANDBOX/context-registration.err" 'context length=568 exceeds carryable 512' "context registration warning"
+printf 'DONE\n' > "$SANDBOX/mode"
+$PMT_BIN _sweep || fail "context truncation sweep failed"
+assert_grep "$SANDBOX/delivered.log" 'context=target=committee-a/report.md; item=32e53681-dc50-4dab-9c81-1bdfd66bb7b9' "context field prefix"
+assert_grep "$SANDBOX/delivered.log" 'evidence=artifact:/n/.../results/04_collect/rows.csv<...truncated [0-9][0-9]* chars>' "context truncation marker"
+if grep -q 'prohibitions=' "$SANDBOX/delivered.log"; then
+    fail "context truncation retained a partial field"
+fi
+
 printf 'RUNNING\n' > "$SANDBOX/mode"
 queue_registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'queue test' --terminal DONE --report-transitions --no-start-report --report-to agent-123 --deliver paseo-queue --deadline +300)" || fail "paseo-queue registration failed"
 queue_id=$(printf '%s\n' "$queue_registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
