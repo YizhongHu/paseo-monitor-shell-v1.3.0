@@ -15,6 +15,8 @@ absent_id=$(printf '%s\n' "$absent_registration" | sed -n 's/^watch \([^ ]*\) re
 absent_dir="$PM_HOME/watches/$absent_id"
 assert_eq "$(cat "$absent_dir/last")" ABSENT "missing remote receipt token"
 assert_grep "$MOCK_DIR/calls.log" 'ssh -o BatchMode=yes -o ConnectTimeout=15 polaris ls -d /scratch/run/receipt' "remote file-exists SSH discipline"
+$PMT_BIN ls > "$SANDBOX/ls.out"
+assert_grep "$SANDBOX/ls.out" 'target=polaris:/scratch/run/receipt' "remote file-exists target names the host"
 
 mock_ssh_script "0${tab}/scratch/run/receipt"
 printf '0\n' > "$absent_dir/nextDue"

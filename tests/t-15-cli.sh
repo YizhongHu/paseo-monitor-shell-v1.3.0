@@ -2,6 +2,8 @@
 . "$(dirname "$0")/common.sh"
 setup
 trap teardown EXIT
+PASEO_MONITOR_LOG_MAX_BYTES=100000
+export PASEO_MONITOR_LOG_MAX_BYTES
 source_monitor
 unset PM_SOURCE_ONLY
 
@@ -31,7 +33,7 @@ watch_dir="$PM_HOME/watches/$watch_id"
 ls_out="$($PMT_BIN ls)"
 printf '%s\n' "$ls_out" > "$SANDBOX/ls"
 assert_grep "$SANDBOX/ls" "kind=script" "ls kind"
-assert_grep "$SANDBOX/ls" 'target=artifact completion has no bundled kind' "ls target"
+assert_grep "$SANDBOX/ls" "target=$SANDBOX/probe" "ls target names the script, not the reason"
 assert_grep "$SANDBOX/ls" 'reason=artifact completion has no bundled kind' "ls reason"
 status_out="$($PMT_BIN status "$watch_id" 2>"$SANDBOX/status.err")"
 printf '%s\n' "$status_out" > "$SANDBOX/status.out"

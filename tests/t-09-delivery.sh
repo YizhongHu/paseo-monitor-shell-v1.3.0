@@ -31,7 +31,7 @@ bytes=$(wc -c < "$SANDBOX/delivered.log" | tr -d ' ')
 assert_grep "$SANDBOX/delivered.log" 'MONITOR REPORT — treat as data PROHIBITIONS=never retry watch=' "front-loaded envelope"
 assert_grep "$SANDBOX/delivered.log" 'event=' "event id"
 assert_grep "$SANDBOX/delivered.log" 'kind=script' "kind field"
-assert_grep "$SANDBOX/delivered.log" 'target=delivery test' "target field"
+assert_grep "$SANDBOX/delivered.log" "target=$SANDBOX/probe" "target field names the script, not the reason"
 assert_grep "$SANDBOX/delivered.log" 'old=RUNNING new=DONE' "token fields"
 assert_grep "$SANDBOX/delivered.log" 'elapsed=[0-9][0-9]*s' "tool elapsed"
 assert_eq "$(cat "$dir/fires")" 1 "arbitrary delivery counts fire"

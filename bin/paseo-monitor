@@ -860,10 +860,17 @@ pm_watch_target() {
         pbs) printf '%s:%s\n' "$(pm_spec_value host "$pwt_dir/spec")" "$(pm_spec_value job "$pwt_dir/spec")" ;;
         globus) printf '%s\n' "$(pm_spec_value task "$pwt_dir/spec")" ;;
         agent) printf '%s\n' "$(pm_spec_value agent "$pwt_dir/spec")" ;;
-        file-exists) printf '%s\n' "$(pm_spec_value path "$pwt_dir/spec")" ;;
+        file-exists)
+            pwt_host="$(pm_spec_value host "$pwt_dir/spec")"
+            pwt_path="$(pm_spec_value path "$pwt_dir/spec")"
+            if [ -n "$pwt_host" ]; then printf '%s:%s\n' "$pwt_host" "$pwt_path"; else printf '%s\n' "$pwt_path"; fi
+            ;;
         git-ref) printf '%s@%s\n' "$(pm_spec_value remote "$pwt_dir/spec")" "$(pm_spec_value ref "$pwt_dir/spec")" ;;
         pr-merge) printf '%s#%s\n' "$(pm_spec_value repo "$pwt_dir/spec")" "$(pm_spec_value pr "$pwt_dir/spec")" ;;
-        script) printf '%s\n' "$(pm_spec_value reason "$pwt_dir/spec")" ;;
+        script)
+            pwt_script="$(pm_spec_value script "$pwt_dir/spec")"
+            if [ -n "$pwt_script" ]; then printf '%s\n' "$pwt_script"; else printf '%s\n' "$pwt_dir/probe"; fi
+            ;;
         *) printf '%s\n' "$pwt_kind" ;;
     esac
 }
@@ -1307,6 +1314,7 @@ expires_in=$pwm_expires_in
 max_fires=$pwm_max_fires
 deliver=$pwm_deliver
 reason=$pwm_reason
+script=$pwm_script
 host=$pwm_host
 job=$pwm_job
 task=$pwm_task
