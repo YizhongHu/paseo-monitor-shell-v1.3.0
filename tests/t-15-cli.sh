@@ -66,6 +66,8 @@ printf '%s\n' "$log_out" > "$SANDBOX/log"
 assert_grep "$SANDBOX/log" 'REGISTER' "log output"
 
 pm_atomic_write "$watch_dir/state" parked
+pm_status "$watch_id" > "$SANDBOX/parked-status.out" 2> "$SANDBOX/parked-status.err"
+assert_grep "$SANDBOX/parked-status.err" 'state=parked; will not probe until poked' "parked status diagnosis"
 poke_out="$($PMT_BIN poke "$watch_id")" || fail "poke failed"
 assert_eq "$(cat "$watch_dir/state")" active "poke resumes parked watch"
 assert_grep "$watch_dir/log" 'POKE resumed parked watch' "poke park resume"

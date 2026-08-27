@@ -1713,7 +1713,8 @@ pm_status_one() {
         pso_attempted=no
     fi
     case "$pso_state" in
-        parked|delivery-failed) printf 'paseo-monitor: WARN watch=%s state=%s\n' "$pso_id" "$pso_state" >&2 ;;
+        parked) printf 'paseo-monitor: WARN watch=%s state=parked; will not probe until poked\n' "$pso_id" >&2 ;;
+        delivery-failed) printf 'paseo-monitor: WARN watch=%s state=delivery-failed\n' "$pso_id" >&2 ;;
     esac
     [ "$pso_undelivered" = yes ] && printf 'paseo-monitor: WARN watch=%s undelivered=yes\n' "$pso_id" >&2
     [ "$pso_health_count" -gt 0 ] && printf 'paseo-monitor: WARN watch=%s health=%s\n' "$pso_id" "$pso_health" >&2
