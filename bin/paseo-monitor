@@ -385,7 +385,11 @@ pm_run_with_timeout() {
     "$@" </dev/null >"$pmt_out_pipe" 2>"$pmt_err_pipe" &
     pmt_child=$!
     (
-        sleep "$pmt_seconds"
+        sleep "$pmt_seconds" &
+        pmt_sleep_pid=$!
+        trap 'kill "$pmt_sleep_pid" 2>/dev/null; exit 0' 0 1 2 3 15
+        wait "$pmt_sleep_pid"
+        trap - 0 1 2 3 15
         if kill -0 "$pmt_child" 2>/dev/null; then
             : > "$pmt_timeout_marker"
             kill "$pmt_child" 2>/dev/null
