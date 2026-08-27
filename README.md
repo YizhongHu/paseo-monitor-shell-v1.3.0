@@ -1,8 +1,9 @@
 # paseo-monitor
 
 `paseo-monitor` is a cheap, stateless watcher for long-running external work.
-A launchd-fired sweeper observes a due watch and reports only state changes;
-the caller owns the liveness backstop. The complete design is in `PLAN.md`.
+A launchd-fired sweeper observes a due watch and reports state changes and
+lifecycle events; the caller owns the liveness backstop. The complete design
+is in `PLAN.md`.
 
 This repository targets macOS and POSIX `sh` (`/bin/sh` is bash 3.2.57 in
 `sh` mode). The deliberate trigger choice is launchd: its GUI agent preserves
@@ -12,22 +13,35 @@ platform-specific shell features and does not use `jq`, `flock`, `setsid`,
 
 ## CLI
 
-The CLI observes and records without requiring a delivery backend. Reports are
-terminal transitions by default; `--report-transitions` opts into intermediate
-changes, and `--report-on` narrows intermediate reports to selected tokens.
-Optional delivery uses one direct-argv backend: `--deliver
-paseo-queue` pipes the report to `paseo-queue add <report-to>`, while
-`--deliver <command>` pipes it to an arbitrary executable. Delivery failures
-remain recorded in the watch for retry on the next sweep.
-Lifecycle reports are unconditional. `rm <id>` or `rm --all` reports
-`class=cancelled` with `old=<last observed token>` and `new=CANCELLED` when a
-watch has never fired and is not terminal or expired. Removing a watch that
-already reported stays silent; terminal, expired, and parked watches have
-already reported. `reap` stays silent because it removes only terminal or
-expired watches. `--max-fires N` reports `class=exhausted` with
-`new=MAX-FIRES-REACHED` once the cap is reached, then reporting stops while
-the watch log continues to record every token change. These reports bypass
-`--report-on` and `--report-transitions`.
+The CLI observes and records without requiring a delivery backend.
+Optional delivery uses one direct-argv backend: `--deliver paseo-queue` pipes
+the report to `paseo-queue add <report-to>`, while `--deliver <command>` pipes
+it to an arbitrary executable. Terminal transitions are reported by default;
+`--report-transitions` opts into intermediate changes, and `--report-on`
+narrows them to selected tokens. At registration, once the synchronous probe
+succeeds, it emits a `class=started` report by default for a non-terminal first
+observation through the configured delivery channel: `old=(none)` and
+`new=<first observed token>`.
+`--no-start-report` suppresses it. A terminal first observation subsumes the
+start, so only the terminal report is emitted. `started` is exempt from
+`--max-fires` and does not increment `fires`; the cap bounds change reports, so
+`--max-fires 1` remains available for the terminal report.
+
+Terminal, health, deadline, cancellation, and exhaustion reports bypass
+`--report-on` and `--report-transitions`; intermediate transitions remain
+opt-in. A clean `started` delivery does not clear `--failsafe`; only terminal
+delivery does. If the delivery backend refuses the registration report, the
+watch remains active, warns with the backend's stderr, records `undelivered`,
+and retries on the next sweep.
+
+`rm <id>` or `rm --all` reports `class=cancelled` with
+`old=<last observed token>` and `new=CANCELLED` when a watch has never fired
+and is not terminal or expired. Removing a watch that already reported stays
+silent; terminal, expired, and parked watches have already reported. `reap`
+stays silent because it removes only terminal or expired watches. `--max-fires
+N` reports `class=exhausted` with `new=MAX-FIRES-REACHED` once the cap is
+reached, then reporting stops while the watch log continues to record every
+token change. These reports bypass `--report-on` and `--report-transitions`.
 
 ```sh
 paseo-monitor watch --kind <kind> [kind args] --deadline <when> [options]
@@ -46,7 +60,8 @@ paseo-monitor _sweep
 
 Common watch options include `--report-transitions`, `--report-on TOK,TOK`,
 `--label k=v`, `--prohibit TEXT`, `--failsafe`, `--max-fires N`, `--max-runs N`,
-and `--expires-in DURATION`. `--with-reason` is the Slurm reason-detail switch;
+`--expires-in DURATION`, and `--no-start-report`. `--with-reason` is the Slurm
+reason-detail switch;
 reason tokens in `--report-on` derive it automatically. Slurm and PBS have
 120-second floors; their defaults are 600 seconds terminal-only and 300
 seconds when transitions are enabled. Other kind floors and defaults are
@@ -75,9 +90,10 @@ Job-id-keyed watches cannot observe a target that never entered the queue.
 
 `--failsafe` creates a bounded one-shot Paseo schedule in the daemon. Its
 pointer-only prompt contains the watch id, the `status`/`log` procedure, and
-the opaque prohibition text, never routing or state. A clean terminal report
-removes the schedule. Use `--max-runs` and `--expires-in` for explicit bounds;
-without them, one run expires at the watch deadline.
+the opaque prohibition text, never routing or state. A clean `started` report
+leaves the schedule in place; a clean terminal report removes it. Use
+`--max-runs` and `--expires-in` for explicit bounds; without them, one run
+expires at the watch deadline.
 
 At registration the tool attempts to harvest the caller's `role`, `job`,
 `item`, and `lane` labels from `paseo inspect "$PASEO_AGENT_ID" --json` when

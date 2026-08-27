@@ -1,6 +1,6 @@
 ---
 name: paseo-monitor
-description: Monitor a long-running job, wait for a Slurm job, watch a Globus transfer, notify when done, wake me when it finishes, avoid going stale, stop polling, and report observed state changes through a cheap bounded watcher.
+description: Monitor a long-running job, wait for a Slurm job, watch a Globus transfer, report when done, avoid going stale, stop polling, and report observed state changes through a cheap bounded watcher.
 ---
 
 # paseo-monitor
@@ -21,21 +21,37 @@ paseo-monitor watch --kind slurm --host cannon --job 24211558 --deadline +3600
 ```
 
 `--report-to` defaults to `$PASEO_AGENT_ID`. Reports go to the caller's queue
-when `--deliver paseo-queue` is selected; registration itself only records the
-watch unless a delivery backend is configured.
+when `--deliver paseo-queue` is selected; without a delivery backend,
+registration records the watch and its reports locally.
 
-### Removal and fire-cap reports
+## Reports
 
-`rm <id>` or `rm --all` reports `class=cancelled` with
-`old=<last observed token>` and `new=CANCELLED` when the watch has never fired
-and is not terminal or expired. Removing a watch that already reported stays
-silent; terminal, expired, and parked watches have already reported. `reap`
-stays silent because it removes only terminal or expired watches.
+After the synchronous registration probe succeeds, reports arrive as follows:
 
-`--max-fires N` reports `class=exhausted` with `new=MAX-FIRES-REACHED` once the
-cap is reached, then reporting stops. Observation continues, and the watch log
-records every token change. These two classes are always reported and bypass
-`--report-on` and `--report-transitions`.
+| Class | When |
+| --- | --- |
+| `started` | At registration by default for a non-terminal first observation: `old=(none)`, `new=<first observed token>`. |
+| `transition` | On an intermediate token change only when `--report-transitions` is enabled; `--report-on` enables this and narrows it to selected tokens. |
+| `terminal` | On a terminal token change, including a terminal first observation. |
+| `deadline` | When the deadline arrives before a terminal observation: `old=<last token>`, `new=DEADLINE`. |
+| `health` | On an unobservable probe: protocol failure reports immediately; repeated auth/config or network failures report after three consecutive failures, with auth/config then parking the watch. |
+| `cancelled` | On explicit `rm <id>` or `rm --all` when an active watch still owes a report: `new=CANCELLED`. |
+| `exhausted` | Once `--max-fires N` is reached: `new=MAX-FIRES-REACHED`; observation and log recording continue. |
+
+`--no-start-report` suppresses the default `started` report. A terminal first
+observation subsumes `started`, so it emits only the terminal report. `started`
+is exempt from `--max-fires` and does not increment `fires`; the cap bounds
+change reports, leaving `--max-fires 1` available for the terminal report.
+
+All lifecycle classes (`started`, `terminal`, `deadline`, `health`, `cancelled`,
+and `exhausted`) bypass `--report-on` and `--report-transitions`. A registration
+delivery failure warns with the backend's stderr, records `undelivered`, and
+leaves the watch active for retry on the next sweep. A clean `started` delivery
+does not clear `--failsafe`; only terminal delivery clears it.
+
+Removing a watch that already reported stays silent; terminal, expired, and
+parked watches have already reported. `reap` stays silent because it removes
+only terminal or expired watches.
 
 ## Kind table
 
@@ -98,8 +114,9 @@ Orchestrator item id; exact full SHA and branch; why or purpose; who owns the
 next action; one evidence line citing an artifact; and prohibitions. `branch`
 and `sha` are recommended label keys for `--label`, never CLI flags.
 
-Other common watch options are `--max-fires N` and `--deliver
-paseo-queue|COMMAND`; the complete syntax is shown by `paseo-monitor --help`.
+Other common watch options are `--max-fires N`, `--no-start-report`, and
+`--deliver paseo-queue|COMMAND`; the complete syntax is shown by
+`paseo-monitor --help`.
 
 ### Labels, prohibitions, and failsafe
 

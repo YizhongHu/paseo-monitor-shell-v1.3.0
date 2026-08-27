@@ -793,10 +793,10 @@ paseo-monitor watch --kind <kind> [kind args] \
     [--terminal TOK,TOK] [--report-on TOK,TOK] [--report-transitions] \
     [--with-reason] [--dwell <n-sweeps>] [--context <text>|--context-file <f>] \
     [--label k=v ...] [--prohibit <text>] [--failsafe] [--max-fires <n>] \
-    [--max-runs <n>] [--expires-in <duration>]
+    [--max-runs <n>] [--expires-in <duration>] [--no-start-report]
 
 paseo-monitor watch --script <file> --reason "<why no kind fits>" \
-    --terminal TOK,TOK [...]
+    --deadline <when> --terminal TOK,TOK [...]
 
 paseo-monitor kinds             # the kind table: name, params, floors
 paseo-monitor ls                # watches: kind, target, state, nextDue, reason
@@ -854,7 +854,7 @@ One contract, honoured identically by bundled probes and `--script`.
 
 ### Trigger semantics
 
-Five event classes, and the distinction matters:
+Six event classes, and the distinction matters:
 
 | Class | Reported |
 |---|---|
@@ -863,6 +863,19 @@ Five event classes, and the distinction matters:
 | **Intermediate** transitions | **opt-in** via `--report-on` |
 | **`cancelled`** removal events | always |
 | **`exhausted`** max-fires events | always |
+| **`started`** registration events | always by default; suppressed by `--no-start-report` |
+
+`started` is emitted by default at registration after the synchronous probe
+succeeds, through the configured delivery channel. Its envelope carries
+`class=started`, `old=(none)`, and `new=<first observed token>`. A terminal
+first observation subsumes it: only the terminal report is emitted. A delivery
+failure at registration warns with the backend's stderr, records `undelivered`,
+and leaves the watch active for retry. `started` is exempt from `--max-fires` and
+does not increment `fires`: the cap bounds change reports, so `--max-fires 1`
+still leaves the terminal report available. A clean `started` delivery does not
+clear `--failsafe`; only terminal delivery does. Like every other lifecycle
+class, it bypasses `--report-on` / `--report-transitions`. Pass
+`--no-start-report` to suppress the registration report.
 
 `cancelled` is emitted by explicit `rm <id>` or `rm --all` only while a watch
 still owes a report: it has never fired and is not already terminal or expired.
