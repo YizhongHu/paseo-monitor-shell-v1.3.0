@@ -18,7 +18,8 @@ mode=\$(cat '$SANDBOX/mode')
 case "\$mode" in
     AUTH) printf 'Permission denied (publickey)\\n' >&2; exit 255 ;;
     NET) printf 'Connection refused\\n' >&2; exit 1 ;;
-    ENV) printf 'ENV-UNAVAILABLE\\n' >&2; exit 1 ;;
+    ENV) printf 'ENV-UNAVAILABLE\n' >&2; exit 1 ;;
+    CONFIG) printf 'helper missing\n' >&2; exit 127 ;;
     *) printf '%s detail\\n' "\$mode" ;;
 esac
 EOF
@@ -74,6 +75,15 @@ $PMT_BIN poke "$auth_id" || fail "poke failed"
 assert_eq "$(cat "$auth_dir/state")" active "poke resumes park"
 assert_eq "$(cat "$auth_dir/health")" '0 healthy' "poke healthy observation"
 
+config_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'config test' --terminal DONE --deadline +300)" || fail "config registration failed"
+config_id=$(printf '%s\n' "$config_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
+config_dir="$PM_HOME/watches/$config_id"
+printf 'CONFIG\n' > "$SANDBOX/mode"
+pm_atomic_write "$config_dir/nextDue" 0
+$PMT_BIN _sweep || fail "config strike failed"
+assert_eq "$(cat "$config_dir/health")" '1 config' "rc=127 config class"
+assert_grep "$config_dir/log" 'PROBE-FAIL class=config count=1 rc=127' "config failure evidence"
+if grep -q 'class=network.*rc=127' "$config_dir/log"; then fail "rc=127 classified as network"; fi
 # Network failures back off but never park.
 printf 'RUNNING\n' > "$SANDBOX/mode"
 network_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'network test' --terminal DONE --deadline +300)" || fail "network registration failed"

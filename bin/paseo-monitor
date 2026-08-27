@@ -998,6 +998,10 @@ pm_health_failure_class() {
     case "$phf_err" in
         *ENV-UNAVAILABLE*|*env-unavailable*) printf 'env-unavailable\n'; return 0 ;;
     esac
+    [ "$phf_rc" -eq 127 ] && {
+        printf 'config'
+        return 0
+    }
     if [ "$phf_rc" -eq 255 ]; then
         case "$phf_err" in
             *[Aa]uthentication*|*[Pp]ermission*|*AUTH*|*auth*|*assword*|*passphrase*|*verification*)
