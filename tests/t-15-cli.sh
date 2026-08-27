@@ -12,6 +12,7 @@ assert_grep "$PMT_REPO_ROOT/bin/paseo-monitor" 'file-exists | File existence' "k
 assert_eq "$(printf '%s\n' "$kinds" | grep -c '^')" 8 "kind count"
 help="$($PMT_BIN --help)"
 printf '%s\n' "$help" > "$SANDBOX/help"
+assert_grep "$SANDBOX/help" '--deadline <when>' "help marks deadline required"
 while IFS= read -r kind_line; do
     case "$help" in
         *"$kind_line"*) ;;
@@ -26,6 +27,17 @@ cat > "$SANDBOX/probe" <<'EOF'
 printf 'DONE artifact-ready\n'
 EOF
 chmod +x "$SANDBOX/probe"
+if $PMT_BIN watch --script "$SANDBOX/probe" --reason 'missing deadline' --terminal DONE 2>"$SANDBOX/missing-deadline.err"; then
+    fail "missing deadline accepted"
+fi
+assert_grep "$SANDBOX/missing-deadline.err" '--deadline is required' "missing deadline required error"
+if $PMT_BIN watch --script "$SANDBOX/probe" --reason 'bad deadline' --terminal DONE --deadline malformed 2>"$SANDBOX/bad-deadline.err"; then
+    fail "malformed deadline accepted"
+fi
+assert_grep "$SANDBOX/bad-deadline.err" 'deadline must be epoch seconds' "malformed deadline error"
+if grep -q -- '--deadline is required' "$SANDBOX/bad-deadline.err"; then
+    fail "malformed deadline used missing-value error"
+fi
 watch_out="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'artifact completion has no bundled kind' --terminal DONE --deadline +300)" || fail "script registration failed"
 watch_id=$(printf '%s\n' "$watch_out" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 [ -n "$watch_id" ] || fail "watch id missing"

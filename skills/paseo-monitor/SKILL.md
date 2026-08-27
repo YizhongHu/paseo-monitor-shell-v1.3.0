@@ -17,7 +17,7 @@ work, read `cluster-access`: cadence is bounded by facility policy.
 ## Minimum viable watch
 
 ```sh
-paseo-monitor watch --kind slurm --host cannon --job 24211558
+paseo-monitor watch --kind slurm --host cannon --job 24211558 --deadline +3600
 ```
 
 `--report-to` defaults to `$PASEO_AGENT_ID`. Reports go to the caller's queue
@@ -29,16 +29,18 @@ watch unless a delivery backend is configured.
 The table below is also emitted by `paseo-monitor kinds` and `paseo-monitor
 --help`. Copy the invocation that matches the target.
 
+Every watch requires `--deadline <when>`; malformed deadline values are rejected separately.
+
 | Kind | Description | Parameters | Floor | Default interval | Copy-pasteable invocation |
 | --- | --- | --- | --- | --- | --- |
-| `slurm` | Slurm job state | `--host <host> --job <id> [--report-transitions] [--report-on <tokens>] [--with-reason]` | 120s | 600s terminal-only, 300s transitions | `paseo-monitor watch --kind slurm --host cannon --job 24211558` |
-| `pbs` | PBS job state | `--host <host> --job <id> [--report-transitions] [--report-on <tokens>]` | 120s | 600s terminal-only, 300s transitions | `paseo-monitor watch --kind pbs --host polaris --job 123.server` |
-| `globus` | Globus transfer status | `--task <id>` | 60s | 300s | `paseo-monitor watch --kind globus --task TASK-ID` |
-| `agent` | Paseo agent status | `--agent <id> [--report-on <tokens>] [--dwell <sweeps>]` | 60s | 60s | `paseo-monitor watch --kind agent --agent AGENT-ID --report-on BLOCKED-PERMISSION,CLOSED,ARCHIVED --dwell 2` |
-| `file-exists` | File existence | `--path <path> [--host <host>]` | 60s local, 120s remote | 60s local, 120s remote | `paseo-monitor watch --kind file-exists --path /scratch/run/receipt --host polaris` |
-| `git-ref` | Git ref SHA | `--remote <remote> --ref <ref>` | 60s | 120s | `paseo-monitor watch --kind git-ref --remote ORIGIN --ref refs/heads/main` |
-| `pr-merge` | Pull request merge state | `--repo <owner/repo> --pr <number>` | 60s | 300s | `paseo-monitor watch --kind pr-merge --repo OWNER/REPO --pr 123` |
-| `script` | Custom executable | `--script <file> --reason "<why no kind fits>"` | 60s | 60s | `paseo-monitor watch --script ./probe.sh --reason "custom direct-argv check" --terminal DONE` |
+| `slurm` | Slurm job state | `--host <host> --job <id> [--report-transitions] [--report-on <tokens>] [--with-reason] --deadline <when>` | 120s | 600s terminal-only, 300s transitions | `paseo-monitor watch --kind slurm --host cannon --job 24211558 --deadline +3600` |
+| `pbs` | PBS job state | `--host <host> --job <id> [--report-transitions] [--report-on <tokens>] --deadline <when>` | 120s | 600s terminal-only, 300s transitions | `paseo-monitor watch --kind pbs --host polaris --job 123.server --deadline +3600` |
+| `globus` | Globus transfer status | `--task <id> --deadline <when>` | 60s | 300s | `paseo-monitor watch --kind globus --task TASK-ID --deadline +3600` |
+| `agent` | Paseo agent status | `--agent <id> [--report-on <tokens>] [--dwell <sweeps>] --deadline <when>` | 60s | 60s | `paseo-monitor watch --kind agent --agent AGENT-ID --report-on BLOCKED-PERMISSION,CLOSED,ARCHIVED --dwell 2 --deadline +3600` |
+| `file-exists` | File existence | `--path <path> [--host <host>] --deadline <when>` | 60s local, 120s remote | 60s local, 120s remote | `paseo-monitor watch --kind file-exists --path /scratch/run/receipt --host polaris --deadline +3600` |
+| `git-ref` | Git ref SHA | `--remote <remote> --ref <ref> --deadline <when>` | 60s | 120s | `paseo-monitor watch --kind git-ref --remote ORIGIN --ref refs/heads/main --deadline +3600` |
+| `pr-merge` | Pull request merge state | `--repo <owner/repo> --pr <number> --deadline <when>` | 60s | 300s | `paseo-monitor watch --kind pr-merge --repo OWNER/REPO --pr 123 --deadline +3600` |
+| `script` | Custom executable | `--script <file> --reason "<why no kind fits>" --deadline <when>` | 60s | 60s | `paseo-monitor watch --script ./probe.sh --reason "custom direct-argv check" --terminal DONE --deadline +3600` |
 
 `pr-merge` treats both `MERGED` and `CLOSED` as terminal. `CLOSED` is an
 observed unmerged human-gate decision, so leaving it active would poll forever

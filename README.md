@@ -21,8 +21,8 @@ paseo-queue` pipes the report to `paseo-queue add <report-to>`, while
 remain recorded in the watch for retry on the next sweep.
 
 ```sh
-paseo-monitor watch --kind <kind> [kind args] [options]
-paseo-monitor watch --script <file> --reason "<why no kind fits>" [options]
+paseo-monitor watch --kind <kind> [kind args] --deadline <when> [options]
+paseo-monitor watch --script <file> --reason "<why no kind fits>" --deadline <when> [options]
 paseo-monitor kinds
 paseo-monitor ls
 paseo-monitor status [<id>]
@@ -32,6 +32,8 @@ paseo-monitor rm <id> | --all
 paseo-monitor reap
 paseo-monitor _sweep
 ```
+
+`--deadline <when>` is required for every watch; malformed deadline values are rejected separately.
 
 Common watch options include `--report-transitions`, `--report-on TOK,TOK`,
 `--label k=v`, `--prohibit TEXT`, `--failsafe`, `--max-runs N`, and

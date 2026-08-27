@@ -43,14 +43,14 @@ umask 077
 
 pm_kind_table() {
     printf '%s\n' \
-        'slurm | Slurm job state | --host <host> --job <id> [--report-transitions] [--report-on <tokens>] [--with-reason] | floor=120 | default=600 terminal-only, 300 transitions' \
-        'pbs | PBS job state | --host <host> --job <id> [--report-transitions] [--report-on <tokens>] | floor=120 | default=600 terminal-only, 300 transitions' \
-        'globus | Globus transfer status | --task <id> | floor=60 | default=300' \
-        'agent | Paseo agent status | --agent <id> [--report-on <tokens>] [--dwell <sweeps>] | floor=60 | default=60' \
-        'file-exists | File existence | --path <path> [--host <host>] | floor=60 local, 120 remote | default=60 local, 120 remote' \
-        'git-ref | Git ref SHA | --remote <remote> --ref <ref> | floor=60 | default=120' \
-        'pr-merge | Pull request merge state | --repo <owner/repo> --pr <number> | floor=60 | default=300' \
-        'script | Custom executable | --script <file> --reason "<why no kind fits>" | floor=60 | default=60'
+        'slurm | Slurm job state | --host <host> --job <id> [--report-transitions] [--report-on <tokens>] [--with-reason] --deadline <when> | floor=120 | default=600 terminal-only, 300 transitions' \
+        'pbs | PBS job state | --host <host> --job <id> [--report-transitions] [--report-on <tokens>] --deadline <when> | floor=120 | default=600 terminal-only, 300 transitions' \
+        'globus | Globus transfer status | --task <id> --deadline <when> | floor=60 | default=300' \
+        'agent | Paseo agent status | --agent <id> [--report-on <tokens>] [--dwell <sweeps>] --deadline <when> | floor=60 | default=60' \
+        'file-exists | File existence | --path <path> [--host <host>] --deadline <when> | floor=60 local, 120 remote | default=60 local, 120 remote' \
+        'git-ref | Git ref SHA | --remote <remote> --ref <ref> --deadline <when> | floor=60 | default=120' \
+        'pr-merge | Pull request merge state | --repo <owner/repo> --pr <number> --deadline <when> | floor=60 | default=300' \
+        'script | Custom executable | --script <file> --reason "<why no kind fits>" --deadline <when> | floor=60 | default=60'
 }
 
 usage() {
@@ -63,7 +63,7 @@ reports state changes; the caller owns the liveness backstop.
 Subcommands:
 
   watch --kind <kind> [kind args] \
-      [--report-to <agent>] [--interval <s>] [--deadline <when>] \
+      [--report-to <agent>] [--interval <s>] --deadline <when> \
       [--terminal TOK,TOK] [--report-on TOK,TOK] [--report-transitions] \
       [--with-reason] [--dwell <n-sweeps>] [--label k=v ...] \
       [--prohibit <text>] [--failsafe] [--max-fires <n>] \
@@ -1271,7 +1271,7 @@ pm_watch_main() {
             --reason) [ "$#" -ge 2 ] || { echo "paseo-monitor: --reason needs a value" >&2; return 2; }; pwm_reason="$2"; shift 2 ;;
             --report-to) [ "$#" -ge 2 ] || { echo "paseo-monitor: --report-to needs a value" >&2; return 2; }; pwm_report_to="$2"; shift 2 ;;
             --interval) [ "$#" -ge 2 ] || { echo "paseo-monitor: --interval needs a value" >&2; return 2; }; pwm_interval="$2"; shift 2 ;;
-            --deadline) [ "$#" -ge 2 ] || { echo "paseo-monitor: --deadline needs a value" >&2; return 2; }; pwm_deadline="$2"; shift 2 ;;
+            --deadline) [ "$#" -ge 2 ] || { echo "paseo-monitor: --deadline is required" >&2; return 2; }; pwm_deadline="$2"; shift 2 ;;
             --terminal) [ "$#" -ge 2 ] || { echo "paseo-monitor: --terminal needs a value" >&2; return 2; }; pwm_terminal="$2"; pwm_terminal_set=1; shift 2 ;;
             --report-on) [ "$#" -ge 2 ] || { echo "paseo-monitor: --report-on needs a value" >&2; return 2; }; pwm_report_on="$2"; pwm_report_transitions=1; shift 2 ;;
             --dwell) [ "$#" -ge 2 ] || { echo "paseo-monitor: --dwell needs a value" >&2; return 2; }; pwm_dwell="$2"; shift 2 ;;
@@ -1363,6 +1363,7 @@ pm_watch_main() {
     [ -n "$pwm_harvested_labels" ] && pwm_labels="${pwm_harvested_labels}${pwm_labels:+|}$pwm_labels"
     pm_valid_uint "$pwm_max_fires" || { echo "paseo-monitor: max-fires must be an integer" >&2; return 2; }
     pwm_now="$(pm_now)"
+    [ -n "$pwm_deadline" ] || { echo "paseo-monitor: --deadline is required" >&2; return 2; }
     pwm_deadline_epoch="$(pm_parse_deadline "$pwm_deadline" "$pwm_now")" || { echo "paseo-monitor: deadline must be epoch seconds, +seconds, or now+seconds" >&2; return 2; }
     [ "$pwm_deadline_epoch" -gt "$pwm_now" ] || { echo "paseo-monitor: deadline must be in the future" >&2; return 2; }
     pm_init_state || return 1

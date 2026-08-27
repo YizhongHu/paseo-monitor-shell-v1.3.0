@@ -782,14 +782,14 @@ Ease of use is part of discoverability. **`--report-to` defaults to
 (verified: it resolves to the calling agent). Minimum viable invocation:
 
 ```sh
-paseo-monitor watch --kind slurm --host cannon --job 24211558
+paseo-monitor watch --kind slurm --host cannon --job 24211558 --deadline +3600
 ```
 
 ## CLI surface
 
 ```sh
 paseo-monitor watch --kind <kind> [kind args] \
-    [--report-to <agent>] [--interval <s>] [--deadline <when>] \
+    [--report-to <agent>] [--interval <s>] --deadline <when> \
     [--terminal TOK,TOK] [--report-on TOK,TOK] [--report-transitions] \
     [--with-reason] [--dwell <n-sweeps>] [--context <text>|--context-file <f>] \
     [--label k=v ...] [--prohibit <text>] [--failsafe] [--max-fires <n>] \
@@ -806,6 +806,8 @@ paseo-monitor poke <id>         # probe now, out of band; also resumes a park
 paseo-monitor rm <id> | --all
 paseo-monitor reap              # drop long-expired watches
 ```
+
+`--deadline <when>` is required for every watch; malformed values are rejected separately.
 
 `poke`, not `drain` — `drain` is queue vocabulary meaning something else.
 
