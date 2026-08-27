@@ -86,6 +86,8 @@ Subcommands:
       Probe now, out of band; also resumes a parked watch.
   rm <id> | --all
       Remove one watch or all watches.
+  # rm reports owed active cancellations; reap remains silent.
+  # --max-fires reports one exhausted event at the cap and keeps observing.
   reap
       Drop watches expired beyond the retention period.
   _sweep
@@ -1022,7 +1024,8 @@ pm_report_event() {
     pm_valid_uint "$pre_fires" || pre_fires=0
     pre_max="$(pm_spec_value max_fires "$pre_dir/spec")"
     pm_valid_uint "$pre_max" || pre_max=0
-    if [ "$pre_max" -gt 0 ] && [ "$pre_fires" -ge "$pre_max" ]; then
+    pre_exempt="${6:-0}"
+    if [ "$pre_max" -gt 0 ] && [ "$pre_fires" -ge "$pre_max" ] && [ "$pre_exempt" != 1 ]; then
         log_line "$pre_dir" SUPPRESSED "$pre_class" "$pre_old -> $pre_new" || :
         return 0
     fi
@@ -1047,6 +1050,7 @@ pm_report_event() {
     if pm_deliver "$pre_dir" "$pre_report"; then
         pm_atomic_write "$pre_dir/fires" "$((pre_fires + 1))" || return 1
         rm -f "$pre_dir/undelivered"
+        [ "$pre_exempt" = 1 ] || pm_announce_exhaustion "$pre_dir" || :
         return 0
     fi
     pre_delivery_err="$(cat "$pre_dir/.delivery.stderr" 2>/dev/null || printf '')"
@@ -1054,6 +1058,22 @@ pm_report_event() {
     pm_atomic_write "$pre_dir/undelivered" "$pre_report" || :
     set_state "$pre_dir" delivery-failed || :
     return 1
+}
+pm_announce_exhaustion() {
+    # pm_announce_exhaustion <watch-dir> -- report once after max-fires is reached.
+    pae_dir="$1"
+    pae_max="$(pm_spec_value max_fires "$pae_dir/spec")"
+    pm_valid_uint "$pae_max" || pae_max=0
+    [ "$pae_max" -gt 0 ] || return 0
+    [ "$(pm_spec_value exhausted "$pae_dir/spec")" = 1 ] && return 0
+    pae_fires="$(cat "$pae_dir/fires" 2>/dev/null || printf '0')"
+    pm_valid_uint "$pae_fires" || pae_fires=0
+    [ "$pae_fires" -ge "$pae_max" ] || return 0
+    pm_spec_backfill "$pae_dir" exhausted 1 || return 1
+    pae_old="$(cat "$pae_dir/last" 2>/dev/null || printf 'UNOBSERVED')"
+    pm_report_event "$pae_dir" exhausted "$pae_old" MAX-FIRES-REACHED \
+        "max-fires=$pae_max reached; no further reports will follow" 1 || :
+    return 0
 }
  
 pm_should_report_transition() {
@@ -1130,6 +1150,7 @@ pm_sweep_watch() {
                 [ "$psw_state" = delivery-failed ] && case "$psw_pending" in *class=terminal*) pm_clear_failsafe "$psw_dir" ;; esac
                 log_line "$psw_dir" DELIVERY-RETRY "$(printf '%s' "$psw_pending" | cut -c1-256)" || :
                 psw_state="$(cat "$psw_dir/state" 2>/dev/null || printf 'active')"
+                pm_announce_exhaustion "$psw_dir" || :
             else
                 psw_delivery_err="$(cat "$psw_dir/.delivery.stderr" 2>/dev/null || printf '')"
                 log_line "$psw_dir" DELIVERY-RETRY-FAILED "$psw_delivery_err" || :
@@ -1474,6 +1495,7 @@ failsafe=$pwm_failsafe
 max_runs=$pwm_max_runs
 expires_in=$pwm_expires_in
 max_fires=$pwm_max_fires
+exhausted=0
 deliver=$pwm_deliver
 deliver_mode=$pwm_deliver_mode
 python=$pwm_python

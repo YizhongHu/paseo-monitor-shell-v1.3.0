@@ -17,6 +17,8 @@ assert_grep "$SANDBOX/kinds" 'example: paseo-monitor watch --kind file-exists --
 printf '%s\n' "$help" > "$SANDBOX/help"
 assert_grep "$SANDBOX/help" '--deadline <when>' "help marks deadline required"
 assert_grep "$SANDBOX/help" 'example: paseo-monitor watch --kind file-exists --path /scratch/run/receipt --deadline +3600' "help receipt invocation"
+assert_grep "$SANDBOX/help" 'rm reports owed active cancellations' "help cancellation behavior"
+assert_grep "$SANDBOX/help" '--max-fires reports one exhausted event' "help exhaustion behavior"
 while IFS= read -r kind_line; do
     case "$help" in
         *"$kind_line"*) ;;

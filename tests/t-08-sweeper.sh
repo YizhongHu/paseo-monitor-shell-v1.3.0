@@ -82,6 +82,11 @@ $PMT_BIN _sweep || fail "max terminal sweep failed"
 max_changes=$(grep -c 'TOKEN-CHANGE' "$max_dir/log")
 max_reports=$(grep -c ' REPORT ' "$max_dir/log")
 assert_eq "$max_changes" 3 "max records all observations"
-assert_eq "$max_reports" 1 "max counts deliveries"
-assert_grep "$max_dir/log" 'SUPPRESSED' "max suppression evidence"
+assert_eq "$max_reports" 2 "max includes exhaustion announcement"
+max_exhausted=$(awk '/class=exhausted/ {count++} END {print count + 0}' "$max_dir/log")
+assert_eq "$max_exhausted" 1 "max exhaustion report count"
+assert_grep "$max_dir/spec" '^exhausted=1$' "max exhaustion marker"
+assert_grep "$max_dir/log" 'REPORT .*class=exhausted' "max exhaustion report"
+assert_grep "$max_dir/log" 'class=exhausted.*old=B.*new=MAX-FIRES-REACHED' "max exhaustion old token"
+assert_grep "$max_dir/log" 'new=MAX-FIRES-REACHED' "max exhaustion token"
 echo PASS: sweep lock, edge trigger, event classes, and max-fires

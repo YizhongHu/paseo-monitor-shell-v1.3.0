@@ -31,6 +31,7 @@ $PMT_BIN _sweep || fail "second moving-ref sweep failed"
 assert_eq "$(cat "$watch_dir/last")" "$sha_c" "second ref movement observed"
 assert_grep "$watch_dir/log" "old=$sha_b new=$sha_c" "second ref evidence carries old/new"
 assert_eq "$(grep -c 'TOKEN-CHANGE' "$watch_dir/log")" 2 "all ref movements recorded"
-assert_eq "$(grep -c ' REPORT ' "$watch_dir/log")" 1 "max-fires binds moving git-ref reports"
+assert_eq "$(grep -c ' REPORT ' "$watch_dir/log")" 2 "max-fires includes exhaustion announcement"
+assert_grep "$watch_dir/log" 'REPORT .*class=exhausted.*new=MAX-FIRES-REACHED' "max-fires exhaustion announcement"
 assert_grep "$watch_dir/log" 'SUPPRESSED transition' "max-fires suppression evidence"
 echo PASS: git-ref SHA token, old/new detail, and max-fires
