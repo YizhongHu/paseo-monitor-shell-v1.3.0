@@ -42,6 +42,7 @@ umask 077
 pm_kind_table() {
     printf '%s\n' \
         'slurm | Slurm job state | --host <host> --job <id> | floor=120 | default=600 terminal-only, 300 transitions' \
+        'pbs | PBS job state | --host <host> --job <id> | floor=120 | default=600 terminal-only, 300 transitions' \
         'globus | Globus transfer status | --task <id> | floor=60 | default=300' \
         'agent | Paseo agent status | --agent <id> [--report-on <tokens>] [--dwell <sweeps>] | floor=60 | default=60' \
         'file-exists | File existence | --path <path> [--host <host>] | floor=60 local, 120 remote | default=60 local, 120 remote' \
@@ -563,6 +564,18 @@ pm_slurm_probe_output() {
     fi
     printf '%s %s\n' "$pspo_token" "$pspo_detail" > "$pspo_out"
 }
+
+pm_pbs_probe_output() {
+    # pm_pbs_probe_output <watch-dir> <stdout> -- map qstat -f artifacts.
+    pppo_dir="$1"
+    pppo_out="$2"
+    pppo_state="$(sed -n 's/^[[:space:]]*job_state[[:space:]]*=[[:space:]]*//p' "$pppo_out" | sed -n '1p')"
+    pppo_state="${pppo_state%% *}"
+    pppo_state="$(printf '%s\n' "$pppo_state" | tr 'a-z' 'A-Z')"
+    [ -n "$pppo_state" ] || return 1
+    pppo_raw="$(tr '\n' ' ' < "$pppo_out" | cut -c1-384)"
+    printf '%s qstat=%s\n' "$pppo_state" "$pppo_raw" > "$pppo_out"
+}
 pm_git_ref_probe_output() {
     # pm_git_ref_probe_output <watch-dir> <stdout> -- extract the observed SHA.
     pgr_dir="$1"
@@ -660,6 +673,14 @@ pm_run_registered_probe() {
             [ "$prp_rc" -eq 0 ] || return "$prp_rc"
             pm_slurm_probe_output "$prp_dir" "$prp_out"
             return 0
+            ;;
+        pbs)
+            pm_run_remote_probe "$prp_out" "$prp_err" "$prp_host" \
+                qstat -f "$prp_job"
+            prp_rc=$?
+            [ "$prp_rc" -eq 0 ] || return "$prp_rc"
+            pm_pbs_probe_output "$prp_dir" "$prp_out"
+            return $?
             ;;
         globus)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \
@@ -773,6 +794,7 @@ pm_watch_target() {
     pwt_kind="$(pm_spec_value kind "$pwt_dir/spec")"
     case "$pwt_kind" in
         slurm) printf '%s:%s\n' "$(pm_spec_value host "$pwt_dir/spec")" "$(pm_spec_value job "$pwt_dir/spec")" ;;
+        pbs) printf '%s:%s\n' "$(pm_spec_value host "$pwt_dir/spec")" "$(pm_spec_value job "$pwt_dir/spec")" ;;
         globus) printf '%s\n' "$(pm_spec_value task "$pwt_dir/spec")" ;;
         agent) printf '%s\n' "$(pm_spec_value agent "$pwt_dir/spec")" ;;
         file-exists) printf '%s\n' "$(pm_spec_value path "$pwt_dir/spec")" ;;
@@ -1026,7 +1048,7 @@ pm_kind_floor() {
     pkf_kind="$1"
     pkf_host="${2:-}"
     case "$pkf_kind" in
-        slurm) printf '120\n' ;;
+        slurm|pbs) printf '120\n' ;;
         globus|git-ref|pr-merge) printf '60\n' ;;
         file-exists)
             [ -n "$pkf_host" ] && printf '120\n' || printf '60\n'
@@ -1041,8 +1063,8 @@ pm_kind_default_interval() {
     pkdi_transitions="$2"
     pkdi_host="${3:-}"
     case "$pkdi_kind:$pkdi_transitions" in
-        slurm:0) printf '600\n' ;;
-        slurm:1) printf '300\n' ;;
+        slurm:0|pbs:0) printf '600\n' ;;
+        slurm:1|pbs:1) printf '300\n' ;;
         globus:*) printf '300\n' ;;
         git-ref:*) printf '120\n' ;;
         pr-merge:*) printf '300\n' ;;
@@ -1137,13 +1159,17 @@ pm_watch_main() {
         return 2
     fi
     [ -n "$pwm_script" ] && pwm_kind=script
-    case "$pwm_kind" in slurm|globus|agent|file-exists|git-ref|pr-merge|script) ;; *) echo "paseo-monitor: unknown kind: $pwm_kind" >&2; return 2 ;; esac
+    case "$pwm_kind" in slurm|pbs|globus|agent|file-exists|git-ref|pr-merge|script) ;; *) echo "paseo-monitor: unknown kind: $pwm_kind" >&2; return 2 ;; esac
     if [ "$pwm_kind" = pr-merge ]; then
         pm_match_csv MERGED "$pwm_terminal" || pwm_terminal="${pwm_terminal},MERGED"
         pm_match_csv CLOSED "$pwm_terminal" || pwm_terminal="${pwm_terminal},CLOSED"
     fi
     if [ "$pwm_kind" = file-exists ]; then
         pm_match_csv EXISTS "$pwm_terminal" || pwm_terminal="${pwm_terminal},EXISTS"
+    fi
+    if [ "$pwm_kind" = pbs ]; then
+        pm_match_csv C "$pwm_terminal" || pwm_terminal="${pwm_terminal},C"
+        pm_match_csv F "$pwm_terminal" || pwm_terminal="${pwm_terminal},F"
     fi
     if [ "$pwm_kind" = agent ] && [ -z "$pwm_report_on" ]; then
         pwm_report_on=BLOCKED-PERMISSION,CLOSED,ARCHIVED
@@ -1156,6 +1182,7 @@ pm_watch_main() {
     fi
     case "$pwm_kind" in
         slurm) [ -n "$pwm_host" ] && [ -n "$pwm_job" ] || { echo "paseo-monitor: slurm needs --host and --job" >&2; return 2; } ;;
+        pbs) [ -n "$pwm_host" ] && [ -n "$pwm_job" ] || { echo "paseo-monitor: pbs needs --host and --job" >&2; return 2; } ;;
         globus) [ -n "$pwm_task" ] || { echo "paseo-monitor: globus needs --task" >&2; return 2; } ;;
         agent) [ -n "$pwm_agent" ] || { echo "paseo-monitor: agent needs --agent" >&2; return 2; } ;;
         file-exists) [ -n "$pwm_path" ] || { echo "paseo-monitor: file-exists needs --path" >&2; return 2; } ;;

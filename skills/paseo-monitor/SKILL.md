@@ -32,9 +32,10 @@ The table below is also emitted by `paseo-monitor kinds` and `paseo-monitor
 | Kind | Description | Parameters | Floor | Default interval | Copy-pasteable invocation |
 | --- | --- | --- | --- | --- | --- |
 | `slurm` | Slurm job state | `--host <host> --job <id>` | 120s | 600s terminal-only, 300s transitions | `paseo-monitor watch --kind slurm --host cannon --job 24211558` |
+| `pbs` | PBS job state | `--host <host> --job <id>` | 120s | 600s terminal-only, 300s transitions | `paseo-monitor watch --kind pbs --host polaris --job 123.server` |
 | `globus` | Globus transfer status | `--task <id>` | 60s | 300s | `paseo-monitor watch --kind globus --task TASK-ID` |
 | `agent` | Paseo agent status | `--agent <id> [--report-on <tokens>] [--dwell <sweeps>]` | 60s | 60s | `paseo-monitor watch --kind agent --agent AGENT-ID --report-on BLOCKED-PERMISSION,CLOSED,ARCHIVED --dwell 2` |
-| `file-exists` | File existence | `--path <path> [--host <host>]` | 60s | 60s | `paseo-monitor watch --kind file-exists --path /scratch/run/receipt --host cannon` |
+| `file-exists` | File existence | `--path <path> [--host <host>]` | 60s local, 120s remote | 60s local, 120s remote | `paseo-monitor watch --kind file-exists --path /scratch/run/receipt --host polaris` |
 | `git-ref` | Git ref SHA | `--remote <remote> --ref <ref>` | 60s | 120s | `paseo-monitor watch --kind git-ref --remote ORIGIN --ref refs/heads/main` |
 | `pr-merge` | Pull request merge state | `--repo <owner/repo> --pr <number>` | 60s | 300s | `paseo-monitor watch --kind pr-merge --repo OWNER/REPO --pr 123` |
 | `script` | Custom executable | `--script <file> --reason "<why no kind fits>"` | 60s | 60s | `paseo-monitor watch --script ./probe.sh --reason "custom direct-argv check" --terminal DONE` |

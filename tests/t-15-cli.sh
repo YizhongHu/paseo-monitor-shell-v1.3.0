@@ -7,7 +7,7 @@ unset PM_SOURCE_ONLY
 
 kinds="$($PMT_BIN kinds)"
 assert_grep "$PMT_REPO_ROOT/bin/paseo-monitor" 'file-exists | File existence' "kinds file-exists"
-assert_eq "$(printf '%s\n' "$kinds" | grep -c '^')" 7 "kind count"
+assert_eq "$(printf '%s\n' "$kinds" | grep -c '^')" 8 "kind count"
 help="$($PMT_BIN --help)"
 printf '%s\n' "$help" > "$SANDBOX/help"
 while IFS= read -r kind_line; do
