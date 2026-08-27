@@ -7,7 +7,7 @@ source_monitor
 remote_dir="$SANDBOX/remote-watch"
 mkdir -p "$remote_dir"
 cat > "$remote_dir/spec" <<'EOF'
-kind=file
+kind=file-exists
 host=cannon
 path=/scratch/result
 EOF

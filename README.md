@@ -32,13 +32,13 @@ paseo-monitor reap
 paseo-monitor _sweep
 ```
 
-Registration output states that delivery is best-effort and makes no wake-up
-promise. The caller owns its liveness backstop.
+Registration output states that delivery is best-effort. The caller owns its
+liveness backstop.
 
 ### Agent stall watch
 
 The `agent` kind watches stalls and observable lifecycle changes, not a
-guaranteed completion event:
+completion event:
 
 ```sh
 paseo-monitor watch --kind agent --agent <id> \

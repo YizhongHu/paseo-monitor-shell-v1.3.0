@@ -1,0 +1,75 @@
+#!/bin/sh
+. "$(dirname "$0")/common.sh"
+setup
+trap teardown EXIT
+source_monitor
+unset PM_SOURCE_ONLY
+
+kinds="$($PMT_BIN kinds)"
+assert_grep "$PMT_REPO_ROOT/bin/paseo-monitor" 'file-exists | File existence' "kinds file-exists"
+assert_eq "$(printf '%s\n' "$kinds" | grep -c '^')" 7 "kind count"
+help="$($PMT_BIN --help)"
+printf '%s\n' "$help" > "$SANDBOX/help"
+while IFS= read -r kind_line; do
+    case "$help" in
+        *"$kind_line"*) ;;
+        *) fail "help kind table: pattern [$kind_line] not found" ;;
+    esac
+done <<EOF
+$(printf '%s\n' "$kinds")
+EOF
+
+cat > "$SANDBOX/probe" <<'EOF'
+#!/bin/sh
+printf 'DONE artifact-ready\n'
+EOF
+chmod +x "$SANDBOX/probe"
+watch_out="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'artifact completion has no bundled kind' --terminal DONE --deadline +300)" || fail "script registration failed"
+watch_id=$(printf '%s\n' "$watch_out" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
+[ -n "$watch_id" ] || fail "watch id missing"
+watch_dir="$PM_HOME/watches/$watch_id"
+ls_out="$($PMT_BIN ls)"
+printf '%s\n' "$ls_out" > "$SANDBOX/ls"
+assert_grep "$SANDBOX/ls" "kind=script" "ls kind"
+assert_grep "$SANDBOX/ls" 'target=artifact completion has no bundled kind' "ls target"
+assert_grep "$SANDBOX/ls" 'reason=artifact completion has no bundled kind' "ls reason"
+status_out="$($PMT_BIN status "$watch_id" 2>"$SANDBOX/status.err")"
+printf '%s\n' "$status_out" > "$SANDBOX/status.out"
+assert_grep "$SANDBOX/status.out" 'last-sweep-age: unknown' "status freshness header"
+assert_grep "$SANDBOX/status.out" 'last_token=DONE' "status last token"
+assert_grep "$SANDBOX/status.out" 'last_transition=(none)' "status transition"
+assert_grep "$SANDBOX/status.out" 'delivery_attempted=no' "status delivery attempt"
+assert_grep "$SANDBOX/status.out" 'undelivered=no' "status undelivered"
+log_out="$($PMT_BIN log "$watch_id" -n 2)"
+printf '%s\n' "$log_out" > "$SANDBOX/log"
+assert_grep "$SANDBOX/log" 'REGISTER' "log output"
+
+pm_atomic_write "$watch_dir/state" parked
+poke_out="$($PMT_BIN poke "$watch_id")" || fail "poke failed"
+assert_eq "$(cat "$watch_dir/state")" active "poke resumes parked watch"
+assert_grep "$watch_dir/log" 'POKE resumed parked watch' "poke park resume"
+pm_atomic_write "$watch_dir/state" delivery-failed
+pm_atomic_write "$watch_dir/health" '1 network'
+$PMT_BIN status "$watch_id" > "$SANDBOX/warn.out" 2> "$SANDBOX/warn.err"
+assert_grep "$SANDBOX/warn.err" 'WARN watch=' "status warning stream"
+assert_grep "$SANDBOX/warn.err" 'health=1 network' "health warning"
+
+old_id="$($PMT_BIN watch --script "$SANDBOX/probe" --reason old --terminal DONE --deadline +300 | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')" || fail "old watch registration failed"
+old_dir="$PM_HOME/watches/$old_id"
+pm_atomic_write "$old_dir/state" terminal
+old_deadline=$(( $(pm_now) - 2592001 ))
+pm_atomic_write "$old_dir/spec" "$(sed "s/^deadline=.*/deadline=$old_deadline/" "$old_dir/spec")"
+recent_id="$($PMT_BIN watch --script "$SANDBOX/probe" --reason recent --terminal DONE --deadline +300 | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')" || fail "recent watch registration failed"
+recent_dir="$PM_HOME/watches/$recent_id"
+pm_atomic_write "$recent_dir/state" terminal
+recent_deadline=$(( $(pm_now) - 2591999 ))
+pm_atomic_write "$recent_dir/spec" "$(sed "s/^deadline=.*/deadline=$recent_deadline/" "$recent_dir/spec")"
+reap_out="$($PMT_BIN reap)"
+printf '%s\n' "$reap_out" > "$SANDBOX/reap"
+[ ! -d "$old_dir" ] || fail "long-expired watch retained"
+[ -d "$recent_dir" ] || fail "recent terminal watch reaped"
+$PMT_BIN rm "$recent_id" || fail "rm one failed"
+[ ! -d "$recent_dir" ] || fail "rm one retained watch"
+$PMT_BIN rm --all || fail "rm all failed"
+[ ! -d "$watch_dir" ] || fail "rm all retained watch"
+echo PASS: CLI kinds, ls, status, log, poke, rm, and reap

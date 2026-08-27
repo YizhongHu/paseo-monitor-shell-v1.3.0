@@ -23,6 +23,17 @@ LC_ALL=C
 export LC_ALL
 umask 077
 
+pm_kind_table() {
+    printf '%s\n' \
+        'slurm | Slurm job state | --host <host> --job <id> | floor=120 | default=600 terminal-only, 300 transitions' \
+        'globus | Globus transfer status | --task <id> | floor=60 | default=300' \
+        'agent | Paseo agent status | --agent <id> [--report-on <tokens>] [--dwell <sweeps>] | floor=60 | default=60' \
+        'file-exists | File existence | --path <path> [--host <host>] | floor=60 | default=60' \
+        'git-ref | Git ref SHA | --remote <remote> --ref <ref> | floor=60 | default=120' \
+        'pr-merge | Pull request merge state | --repo <owner/repo> --pr <number> | floor=60 | default=300' \
+        'script | Custom executable | --script <file> --reason "<why no kind fits>" | floor=60 | default=60'
+}
+
 usage() {
     cat <<'EOF'
 Usage: paseo-monitor <subcommand> [args]
@@ -51,11 +62,11 @@ Subcommands:
   log <id> [-n N] [-f]
       Show a watch log.
   poke <id>
-      Probe now, out of band.
+      Probe now, out of band; also resumes a parked watch.
   rm <id> | --all
       Remove one watch or all watches.
   reap
-      Drop long-expired watches; not implemented yet.
+      Drop watches expired beyond the retention period.
   _sweep
       Run one stateless sweep; used by launchd.
   help | --help | -h
@@ -89,6 +100,8 @@ Environment knobs (read once into internal PM_* variables):
 The external names above are never read below startup. Probes inherit the
 calling environment deliberately; credentials such as SSH_AUTH_SOCK matter.
 EOF
+    printf '\nKind table:\n'
+    pm_kind_table
 }
 
 # --- Fixed-name shell primitives copied from paseo-queue -----------------
@@ -630,7 +643,7 @@ pm_run_registered_probe() {
             printf '%s\n' "$prp_agent_line" > "$prp_out"
             return 0
             ;;
-        file)
+        file-exists)
             if [ -n "$prp_host" ]; then
                 pm_run_remote_probe "$prp_out" "$prp_err" "$prp_host" \
                     ls -d "$prp_path"
@@ -722,7 +735,7 @@ pm_watch_target() {
         slurm) printf '%s:%s\n' "$(pm_spec_value host "$pwt_dir/spec")" "$(pm_spec_value job "$pwt_dir/spec")" ;;
         globus) printf '%s\n' "$(pm_spec_value task "$pwt_dir/spec")" ;;
         agent) printf '%s\n' "$(pm_spec_value agent "$pwt_dir/spec")" ;;
-        file) printf '%s\n' "$(pm_spec_value path "$pwt_dir/spec")" ;;
+        file-exists) printf '%s\n' "$(pm_spec_value path "$pwt_dir/spec")" ;;
         git-ref) printf '%s@%s\n' "$(pm_spec_value remote "$pwt_dir/spec")" "$(pm_spec_value ref "$pwt_dir/spec")" ;;
         pr-merge) printf '%s#%s\n' "$(pm_spec_value repo "$pwt_dir/spec")" "$(pm_spec_value pr "$pwt_dir/spec")" ;;
         script) printf '%s\n' "$(pm_spec_value reason "$pwt_dir/spec")" ;;
@@ -974,7 +987,7 @@ pm_kind_floor() {
     case "$pkf_kind" in
         slurm) printf '120\n' ;;
         globus|git-ref|pr-merge) printf '60\n' ;;
-        agent|file|script) printf '60\n' ;;
+        agent|file-exists|script) printf '60\n' ;;
         *) printf '60\n' ;;
     esac
 }
@@ -1076,7 +1089,7 @@ pm_watch_main() {
         return 2
     fi
     [ -n "$pwm_script" ] && pwm_kind=script
-    case "$pwm_kind" in slurm|globus|agent|file|git-ref|pr-merge|script) ;; *) echo "paseo-monitor: unknown kind: $pwm_kind" >&2; return 2 ;; esac
+    case "$pwm_kind" in slurm|globus|agent|file-exists|git-ref|pr-merge|script) ;; *) echo "paseo-monitor: unknown kind: $pwm_kind" >&2; return 2 ;; esac
     if [ "$pwm_kind" = agent ] && [ -z "$pwm_report_on" ]; then
         pwm_report_on=BLOCKED-PERMISSION,CLOSED,ARCHIVED
         pwm_report_transitions=1
@@ -1090,7 +1103,7 @@ pm_watch_main() {
         slurm) [ -n "$pwm_host" ] && [ -n "$pwm_job" ] || { echo "paseo-monitor: slurm needs --host and --job" >&2; return 2; } ;;
         globus) [ -n "$pwm_task" ] || { echo "paseo-monitor: globus needs --task" >&2; return 2; } ;;
         agent) [ -n "$pwm_agent" ] || { echo "paseo-monitor: agent needs --agent" >&2; return 2; } ;;
-        file) [ -n "$pwm_path" ] || { echo "paseo-monitor: file needs --path" >&2; return 2; } ;;
+        file-exists) [ -n "$pwm_path" ] || { echo "paseo-monitor: file-exists needs --path" >&2; return 2; } ;;
         git-ref) [ -n "$pwm_remote" ] && [ -n "$pwm_ref" ] || { echo "paseo-monitor: git-ref needs --remote and --ref" >&2; return 2; } ;;
         pr-merge) [ -n "$pwm_repo" ] && [ -n "$pwm_pr" ] || { echo "paseo-monitor: pr-merge needs --repo and --pr" >&2; return 2; } ;;
     esac
@@ -1166,21 +1179,14 @@ labels=$pwm_labels"
     rm -f "$pwm_out" "$pwm_err"
     pwm_attempts=$(( (pwm_deadline_epoch - pwm_now + pwm_interval - 1) / pwm_interval ))
     printf 'watch %s registered: token=%s\n' "$pwm_id" "$PM_PARSED_TOKEN"
-    printf 'delivery is best-effort; this tool does not guarantee wake-up\n'
+    printf 'delivery is best-effort; caller owns the liveness backstop\n'
     printf 'will probe ≤ %s times before deadline (interval=%ss)\n' "$pwm_attempts" "$pwm_interval"
 }
  
 pm_kinds() {
-    printf '%s\n' \
-        'slurm host,job floor=120 default=600 terminal-only/300 transitions' \
-        'globus task floor=60 default=300' \
-        'agent agent floor=60 default=60' \
-        'file path[,host] floor=60 default=60' \
-        'git-ref remote,ref floor=60 default=120' \
-        'pr-merge repo,pr floor=60 default=300' \
-        'script executable,reason floor=60 default=60'
+    pm_kind_table
 }
- 
+
 pm_ls() {
     pm_init_state || return 1
     for pml_dir in "$PM_HOME"/watches/*; do
@@ -1188,8 +1194,10 @@ pm_ls() {
         pml_id="$(basename "$pml_dir")"
         printf '%s kind=%s target=%s state=%s nextDue=%s reason=%s\n' \
             "$pml_id" "$(pm_spec_value kind "$pml_dir/spec")" \
-            "$(pm_spec_value host "$pml_dir/spec")$(pm_spec_value job "$pml_dir/spec")$(pm_spec_value path "$pml_dir/spec")$(pm_spec_value task "$pml_dir/spec")$(pm_spec_value ref "$pml_dir/spec")" \
-            "$(cat "$pml_dir/state" 2>/dev/null)" "$(cat "$pml_dir/nextDue" 2>/dev/null)" "$(pm_spec_value reason "$pml_dir/spec")"
+            "$(pm_watch_target "$pml_dir")" \
+            "$(cat "$pml_dir/state" 2>/dev/null || printf 'active')" \
+            "$(cat "$pml_dir/nextDue" 2>/dev/null || printf '')" \
+            "$(pm_spec_value reason "$pml_dir/spec")"
     done
 }
 
@@ -1198,6 +1206,8 @@ pm_status_one() {
     pso_id="$(basename "$pso_dir")"
     pso_state="$(cat "$pso_dir/state" 2>/dev/null || printf 'active')"
     pso_health="$(cat "$pso_dir/health" 2>/dev/null || printf '0 none')"
+    pso_health_count="${pso_health%% *}"
+    pm_valid_uint "$pso_health_count" || pso_health_count=0
     pso_last="$(cat "$pso_dir/last" 2>/dev/null || printf '(none)')"
     pso_transition="$(cat "$pso_dir/lastTransition" 2>/dev/null || printf '(none)')"
     pso_fires="$(cat "$pso_dir/fires" 2>/dev/null || printf '0')"
@@ -1213,6 +1223,11 @@ pm_status_one() {
     else
         pso_attempted=no
     fi
+    case "$pso_state" in
+        parked|delivery-failed) printf 'paseo-monitor: WARN watch=%s state=%s\n' "$pso_id" "$pso_state" >&2 ;;
+    esac
+    [ "$pso_undelivered" = yes ] && printf 'paseo-monitor: WARN watch=%s undelivered=yes\n' "$pso_id" >&2
+    [ "$pso_health_count" -gt 0 ] && printf 'paseo-monitor: WARN watch=%s health=%s\n' "$pso_id" "$pso_health" >&2
     printf 'watch=%s kind=%s target=%s state=%s health=%s\n' \
         "$pso_id" "$(pm_spec_value kind "$pso_dir/spec")" "$(pm_watch_target "$pso_dir")" "$pso_state" "$pso_health"
     printf 'last_token=%s last_transition=%s delivery_attempted=%s undelivered=%s fires=%s deadline=%s log=%s\n' \
@@ -1234,6 +1249,10 @@ pm_status() {
     else
         printf 'last-sweep-age: unknown\n'
     fi
+    [ "$#" -le 1 ] || {
+        printf 'paseo-monitor: status accepts at most one watch id\n' >&2
+        return 2
+    }
     if [ "$#" -gt 0 ]; then
         pms_dir="$PM_HOME/watches/$1"
         [ -f "$pms_dir/spec" ] || {
@@ -1248,6 +1267,113 @@ pm_status() {
         pm_status_one "$pms_dir"
     done
 }
+pm_validate_watch_id() {
+    case "$1" in
+        ''|.|..|*/*) return 1 ;;
+    esac
+    return 0
+}
+
+pm_log() {
+    [ "$#" -ge 1 ] || {
+        printf 'paseo-monitor: log needs a watch id\n' >&2
+        return 2
+    }
+    plg_id="$1"
+    pm_validate_watch_id "$plg_id" || {
+        printf 'paseo-monitor: invalid watch id: %s\n' "$plg_id" >&2
+        return 2
+    }
+    shift
+    plg_n=20
+    plg_follow=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -n)
+                [ "$#" -ge 2 ] || { printf 'paseo-monitor: -n needs a value\n' >&2; return 2; }
+                pm_valid_uint "$2" || { printf 'paseo-monitor: -n must be an integer\n' >&2; return 2; }
+                plg_n="$2"
+                shift 2
+                ;;
+            -f) plg_follow=1; shift ;;
+            *) printf 'paseo-monitor: unknown log option: %s\n' "$1" >&2; return 2 ;;
+        esac
+    done
+    plg_path="$PM_HOME/watches/$plg_id/log"
+    [ -f "$plg_path" ] || [ -f "$plg_path.1" ] || {
+        printf 'paseo-monitor: log not found for watch: %s\n' "$plg_id" >&2
+        return 1
+    }
+    if [ "$plg_follow" -eq 1 ]; then
+        [ -f "$plg_path" ] || {
+            printf 'paseo-monitor: log not found for watch: %s\n' "$plg_id" >&2
+            return 1
+        }
+        tail -n "$plg_n" -f "$plg_path"
+    elif [ -f "$plg_path.1" ] && [ -f "$plg_path" ]; then
+        cat "$plg_path.1" "$plg_path" | tail -n "$plg_n"
+    elif [ -f "$plg_path" ]; then
+        tail -n "$plg_n" "$plg_path"
+    else
+        tail -n "$plg_n" "$plg_path.1"
+    fi
+}
+
+pm_rm() {
+    [ "$#" -eq 1 ] || {
+        printf 'paseo-monitor: rm needs <id> or --all\n' >&2
+        return 2
+    }
+    pm_init_state || return 1
+    if [ "$1" = --all ]; then
+        prm_count=0
+        acquire_lock "$PM_HOME" || return 1
+        trap 'release_lock "$PM_HOME"' 0 1 2 3 15
+        for prm_dir in "$PM_HOME"/watches/*; do
+            [ -d "$prm_dir" ] || continue
+            rm -rf "$prm_dir"
+            prm_count=$((prm_count + 1))
+        done
+        printf 'removed %s watch(es)\n' "$prm_count"
+        return 0
+    fi
+    prm_id="$1"
+    pm_validate_watch_id "$prm_id" || {
+        printf 'paseo-monitor: invalid watch id: %s\n' "$prm_id" >&2
+        return 2
+    }
+    prm_dir="$PM_HOME/watches/$prm_id"
+    [ -d "$prm_dir" ] || {
+        printf 'paseo-monitor: watch not found: %s\n' "$prm_id" >&2
+        return 1
+    }
+    acquire_lock "$PM_HOME" || return 1
+    trap 'release_lock "$PM_HOME"' 0 1 2 3 15
+    rm -rf "$prm_dir"
+    printf 'removed watch %s\n' "$prm_id"
+}
+
+pm_reap() {
+    pm_init_state || return 1
+    acquire_lock "$PM_HOME" || return 1
+    trap 'release_lock "$PM_HOME"' 0 1 2 3 15
+    preap_now="$(pm_now)"
+    preap_retention=2592000
+    preap_count=0
+    for preap_dir in "$PM_HOME"/watches/*; do
+        [ -f "$preap_dir/spec" ] || continue
+        preap_state="$(cat "$preap_dir/state" 2>/dev/null || printf '')"
+        case "$preap_state" in terminal|expired) ;; *) continue ;; esac
+        preap_deadline="$(pm_spec_value deadline "$preap_dir/spec")"
+        pm_valid_uint "$preap_deadline" || continue
+        [ "$preap_now" -ge "$preap_deadline" ] || continue
+        [ "$((preap_now - preap_deadline))" -ge "$preap_retention" ] || continue
+        rm -rf "$preap_dir"
+        preap_count=$((preap_count + 1))
+    done
+    printf 'reaped %s watch(es)\n' "$preap_count"
+}
+
 
 pm_poke() {
     [ "$#" -eq 1 ] || {
@@ -1255,6 +1381,11 @@ pm_poke() {
         return 2
     }
     pm_init_state || return 1
+    pmp_id="$1"
+    pm_validate_watch_id "$pmp_id" || {
+        printf 'paseo-monitor: invalid watch id: %s\n' "$pmp_id" >&2
+        return 2
+    }
     pmp_dir="$PM_HOME/watches/$1"
     [ -f "$pmp_dir/spec" ] || {
         printf 'paseo-monitor: watch not found: %s\n' "$1" >&2
@@ -1271,10 +1402,6 @@ pm_poke() {
     pm_sweep_watch "$pmp_dir"
 }
 
-not_implemented() {
-    printf 'paseo-monitor: %s: not implemented yet\n' "$1" >&2
-    return 1
-}
 
 if [ "${PM_SOURCE_ONLY:-0}" -ne 1 ]; then
     if [ "$(id -u)" = 0 ]; then
@@ -1306,8 +1433,17 @@ if [ "${PM_SOURCE_ONLY:-0}" -ne 1 ]; then
             shift
             pm_poke "$@"
             ;;
-        log|rm|reap)
-            not_implemented "$1"
+        log)
+            shift
+            pm_log "$@"
+            ;;
+        rm)
+            shift
+            pm_rm "$@"
+            ;;
+        reap)
+            shift
+            pm_reap "$@"
             ;;
         *)
             printf 'paseo-monitor: unknown subcommand: %s\n' "$1" >&2
