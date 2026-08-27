@@ -15,6 +15,7 @@ case "$PM_LOCK_GRACE_SECONDS" in ''|*[!0-9]*) PM_LOCK_GRACE_SECONDS=5 ;; esac
 case "$PM_BACKOFF_SCALE" in ''|*[!0-9]*) PM_BACKOFF_SCALE=1 ;; esac
 case "$PM_FAST_SWEEP" in 0|1) ;; *) PM_FAST_SWEEP=0 ;; esac
 case "$PM_PROBE_TIMEOUT" in ''|*[!0-9]*) PM_PROBE_TIMEOUT=45 ;; esac
+PM_PY_AGENT_PROBE='import json,sys; d=json.load(sys.stdin); status=str(d.get("Status",d.get("status","UNKNOWN"))).upper(); archived=bool(d.get("Archived",d.get("archived",False))); perms=d.get("PendingPermissions",d.get("pendingPermissions",[])); perms=perms if isinstance(perms,list) else []; token="ARCHIVED" if archived else ("BLOCKED-PERMISSION" if perms else status); print("%s status=%s archived=%s pendingPermissions=%d" % (token,status,str(archived).lower(),len(perms)))'
 
 LC_ALL=C
 export LC_ALL
@@ -457,6 +458,11 @@ pm_run_registered_probe() {
         agent)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \
                 paseo inspect "$prp_agent" --json
+            prp_rc=$?
+            [ "$prp_rc" -eq 0 ] || return "$prp_rc"
+            prp_agent_line="$(python3 -c "$PM_PY_AGENT_PROBE" < "$prp_out" 2>>"$prp_err")" || return 1
+            printf '%s\n' "$prp_agent_line" > "$prp_out"
+            return 0
             ;;
         file)
             if [ -n "$prp_host" ]; then
@@ -467,6 +473,15 @@ pm_run_registered_probe() {
                 pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \
                     ls -d "$prp_path"
             fi
+            prp_rc=$?
+            if [ "$prp_rc" -eq 0 ]; then
+                prp_file_detail="$(sed -n '1p' "$prp_out")"
+                printf 'PRESENT %s\n' "$prp_file_detail" > "$prp_out"
+                return 0
+            fi
+            [ -n "$prp_host" ] && [ "$prp_rc" -eq 255 ] && return "$prp_rc"
+            printf 'ABSENT %s\n' "$prp_path" > "$prp_out"
+            return 0
             ;;
         git-ref)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \
@@ -689,6 +704,7 @@ pm_watch_main() {
     pwm_interval=""
     pwm_deadline=""
     pwm_terminal="$PM_DEFAULT_TERMINAL"
+    pwm_terminal_set=0
     pwm_report_on=""
     pwm_report_transitions=0
     pwm_dwell=0
@@ -715,7 +731,7 @@ pm_watch_main() {
             --report-to) [ "$#" -ge 2 ] || { echo "paseo-monitor: --report-to needs a value" >&2; return 2; }; pwm_report_to="$2"; shift 2 ;;
             --interval) [ "$#" -ge 2 ] || { echo "paseo-monitor: --interval needs a value" >&2; return 2; }; pwm_interval="$2"; shift 2 ;;
             --deadline) [ "$#" -ge 2 ] || { echo "paseo-monitor: --deadline needs a value" >&2; return 2; }; pwm_deadline="$2"; shift 2 ;;
-            --terminal) [ "$#" -ge 2 ] || { echo "paseo-monitor: --terminal needs a value" >&2; return 2; }; pwm_terminal="$2"; shift 2 ;;
+            --terminal) [ "$#" -ge 2 ] || { echo "paseo-monitor: --terminal needs a value" >&2; return 2; }; pwm_terminal="$2"; pwm_terminal_set=1; shift 2 ;;
             --report-on) [ "$#" -ge 2 ] || { echo "paseo-monitor: --report-on needs a value" >&2; return 2; }; pwm_report_on="$2"; pwm_report_transitions=1; shift 2 ;;
             --dwell) [ "$#" -ge 2 ] || { echo "paseo-monitor: --dwell needs a value" >&2; return 2; }; pwm_dwell="$2"; shift 2 ;;
             --report-transitions) pwm_report_transitions=1; shift ;;
@@ -750,6 +766,7 @@ pm_watch_main() {
     case "$pwm_kind" in slurm|globus|agent|file|git-ref|pr-merge|script) ;; *) echo "paseo-monitor: unknown kind: $pwm_kind" >&2; return 2 ;; esac
     if [ "$pwm_kind" = script ]; then
         [ -n "$pwm_reason" ] || { echo "paseo-monitor: --reason is mandatory with --script" >&2; return 2; }
+        [ "$pwm_terminal_set" -eq 1 ] || { echo "paseo-monitor: --terminal is mandatory with --script" >&2; return 2; }
         [ -f "$pwm_script" ] && [ -x "$pwm_script" ] || { echo "paseo-monitor: script must be an executable file: $pwm_script" >&2; return 2; }
     fi
     case "$pwm_kind" in
@@ -826,7 +843,7 @@ labels=$pwm_labels"
     rm -f "$pwm_out" "$pwm_err"
     pwm_attempts=$(( (pwm_deadline_epoch - pwm_now + pwm_interval - 1) / pwm_interval ))
     printf 'watch %s registered: token=%s\n' "$pwm_id" "$PM_PARSED_TOKEN"
-    printf 'will probe <= %s times before deadline (interval=%ss)\n' "$pwm_attempts" "$pwm_interval"
+    printf 'will probe ≤ %s times before deadline (interval=%ss)\n' "$pwm_attempts" "$pwm_interval"
 }
  
 pm_kinds() {
