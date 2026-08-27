@@ -1854,6 +1854,7 @@ pm_rm() {
             acquire_lock "$PM_HOME" || return 1
             trap 'release_lock "$PM_HOME"' 0 1 2 3 15
             if [ "$prm_mode" = --all-agents ]; then
+                printf 'cross-owner removal authorized by --all-agents; no interactive prompt used\n'
                 for prm_dir in "$PM_HOME"/watches/*; do
                     [ -f "$prm_dir/spec" ] || continue
                     pm_is_graveyard "$prm_dir" && continue
