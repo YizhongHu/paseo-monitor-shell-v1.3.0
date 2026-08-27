@@ -10,5 +10,24 @@ case "${1:-}" in
         [ "${3:-}" = "--json" ] || exit 2
         if [ -f "$MOCK_DIR/inspect.json" ]; then cat "$MOCK_DIR/inspect.json"; else printf '{}\n'; fi
         ;;
+    schedule)
+        case "${2:-}" in
+            create)
+                sm_next="$(cat "$MOCK_DIR/schedule.next" 2>/dev/null || printf '1')"
+                sm_id="mock-schedule-$sm_next"
+                printf '%s\n' "$((sm_next + 1))" > "$MOCK_DIR/schedule.next"
+                printf '%s\n' "${3:-}" > "$MOCK_DIR/schedule.$sm_id"
+                printf '{"id":"%s"}\n' "$sm_id"
+                ;;
+            delete)
+                sm_id="${3:-}"
+                rm -f "$MOCK_DIR/schedule.$sm_id"
+                ;;
+            ls|inspect|logs|pause|resume|run-once|update)
+                printf '[]\n'
+                ;;
+            *) exit 2 ;;
+        esac
+        ;;
     *) exit 2 ;;
 esac

@@ -43,8 +43,8 @@ umask 077
 
 pm_kind_table() {
     printf '%s\n' \
-        'slurm | Slurm job state | --host <host> --job <id> | floor=120 | default=600 terminal-only, 300 transitions' \
-        'pbs | PBS job state | --host <host> --job <id> | floor=120 | default=600 terminal-only, 300 transitions' \
+        'slurm | Slurm job state | --host <host> --job <id> [--report-transitions] [--report-on <tokens>] [--with-reason] | floor=120 | default=600 terminal-only, 300 transitions' \
+        'pbs | PBS job state | --host <host> --job <id> [--report-transitions] [--report-on <tokens>] | floor=120 | default=600 terminal-only, 300 transitions' \
         'globus | Globus transfer status | --task <id> | floor=60 | default=300' \
         'agent | Paseo agent status | --agent <id> [--report-on <tokens>] [--dwell <sweeps>] | floor=60 | default=60' \
         'file-exists | File existence | --path <path> [--host <host>] | floor=60 local, 120 remote | default=60 local, 120 remote' \
@@ -64,9 +64,10 @@ Subcommands:
 
   watch --kind <kind> [kind args] \
       [--report-to <agent>] [--interval <s>] [--deadline <when>] \
-      [--terminal TOK,TOK] [--report-on TOK,TOK] [--dwell <n-sweeps>] \
-      [--label k=v ...] [--prohibit <text>] [--failsafe] [--max-fires <n>]
-      [--deliver paseo-queue|<command>]
+      [--terminal TOK,TOK] [--report-on TOK,TOK] [--report-transitions] \
+      [--with-reason] [--dwell <n-sweeps>] [--label k=v ...] \
+      [--prohibit <text>] [--failsafe] [--max-fires <n>] \
+      [--max-runs <n>] [--expires-in <duration>]
       Register a bundled probe.
   watch --script <file> --reason "<why no kind fits>" \
       [--terminal TOK,TOK] [same common options as --kind]
@@ -1167,9 +1168,12 @@ pm_watch_main() {
     pwm_dwell=0
     pwm_context=""
     pwm_labels=""
+    pwm_harvested_labels=""
     pwm_prohibit=""
     pwm_failsafe=0
     pwm_max_fires=0
+    pwm_max_runs=1
+    pwm_expires_in=""
     pwm_host=""
     pwm_job=""
     pwm_task=""
@@ -1195,6 +1199,8 @@ pm_watch_main() {
             --context) [ "$#" -ge 2 ] || { echo "paseo-monitor: --context needs a value" >&2; return 2; }; pwm_context="$2"; shift 2 ;;
             --context-file) [ "$#" -ge 2 ] || { echo "paseo-monitor: --context-file needs a value" >&2; return 2; }; [ -f "$2" ] || { echo "paseo-monitor: context file not found: $2" >&2; return 2; }; pwm_context="$(cat "$2")"; shift 2 ;;
             --label) [ "$#" -ge 2 ] || { echo "paseo-monitor: --label needs k=v" >&2; return 2; }; case "$2" in *=*) pwm_labels="${pwm_labels}${pwm_labels:+|}$2" ;; *) echo "paseo-monitor: --label requires k=v" >&2; return 2 ;; esac; shift 2 ;;
+            --max-runs) [ "$#" -ge 2 ] || { echo "paseo-monitor: --max-runs needs a value" >&2; return 2; }; pwm_max_runs="$2"; shift 2 ;;
+            --expires-in) [ "$#" -ge 2 ] || { echo "paseo-monitor: --expires-in needs a duration" >&2; return 2; }; pwm_expires_in="$2"; shift 2 ;;
             --prohibit) [ "$#" -ge 2 ] || { echo "paseo-monitor: --prohibit needs a value" >&2; return 2; }; pwm_prohibit="$2"; shift 2 ;;
             --failsafe) pwm_failsafe=1; shift ;;
             --max-fires) [ "$#" -ge 2 ] || { echo "paseo-monitor: --max-fires needs a value" >&2; return 2; }; pwm_max_fires="$2"; shift 2 ;;
@@ -1259,6 +1265,14 @@ pm_watch_main() {
     pm_valid_uint "$pwm_interval" || { echo "paseo-monitor: interval must be an integer" >&2; return 2; }
     [ "$pwm_interval" -ge "$pwm_floor" ] || { echo "paseo-monitor: interval $pwm_interval is below $pwm_kind floor $pwm_floor" >&2; return 2; }
     pm_valid_uint "$pwm_dwell" || { echo "paseo-monitor: dwell must be an integer" >&2; return 2; }
+    pm_valid_uint "$pwm_max_runs" || { echo "paseo-monitor: max-runs must be an integer" >&2; return 2; }
+    [ "$pwm_max_runs" -gt 0 ] || { echo "paseo-monitor: max-runs must be greater than zero" >&2; return 2; }
+    if [ -n "$pwm_expires_in" ] && [ "$pwm_failsafe" -ne 1 ]; then
+        echo "paseo-monitor: --expires-in requires --failsafe" >&2
+        return 2
+    fi
+    pwm_harvested_labels="$(pm_harvest_labels)"
+    [ -n "$pwm_harvested_labels" ] && pwm_labels="${pwm_harvested_labels}${pwm_labels:+|}$pwm_labels"
     pm_valid_uint "$pwm_max_fires" || { echo "paseo-monitor: max-fires must be an integer" >&2; return 2; }
     pwm_now="$(pm_now)"
     pwm_deadline_epoch="$(pm_parse_deadline "$pwm_deadline" "$pwm_now")" || { echo "paseo-monitor: deadline must be epoch seconds, +seconds, or now+seconds" >&2; return 2; }
@@ -1287,6 +1301,8 @@ report_transitions=$pwm_report_transitions
 dwell=$pwm_dwell
 prohibit=$pwm_prohibit
 failsafe=$pwm_failsafe
+max_runs=$pwm_max_runs
+expires_in=$pwm_expires_in
 max_fires=$pwm_max_fires
 deliver=$pwm_deliver
 reason=$pwm_reason
@@ -1319,6 +1335,19 @@ labels=$pwm_labels"
     pm_atomic_write "$pwm_dir/detail" "$PM_PARSED_DETAIL" || { rm -rf "$pwm_dir"; return 1; }
     pwm_next="$(pm_next_due "$pwm_now" "$pwm_interval" "$pwm_id")"
     pm_atomic_write "$pwm_dir/nextDue" "$pwm_next" || { rm -rf "$pwm_dir"; return 1; }
+    if [ "$pwm_failsafe" -eq 1 ] && ! pm_terminal_token "$PM_PARSED_TOKEN" "$pwm_terminal"; then
+        pwm_failsafe_expires="$pwm_expires_in"
+        if [ -z "$pwm_failsafe_expires" ]; then
+            pwm_failsafe_delay=$((pwm_deadline_epoch - pwm_now))
+            pwm_failsafe_expires="${pwm_failsafe_delay}s"
+        fi
+        pwm_failsafe_prompt="paseo-monitor status $pwm_id before anything else; then inspect paseo-monitor log $pwm_id. PROHIBITIONS: ${pwm_prohibit:-"(none)"}"
+        pm_schedule_create "$pwm_dir" "$pwm_failsafe_expires" "$pwm_max_runs" "$pwm_failsafe_expires" "$pwm_failsafe_prompt" || {
+            echo "paseo-monitor: failsafe schedule creation failed" >&2
+            rm -rf "$pwm_dir"
+            return 1
+        }
+    fi
     log_line "$pwm_dir" REGISTER "token=$PM_PARSED_TOKEN" "detail=$PM_PARSED_DETAIL" || :
     pwm_trigger="$(pm_trigger_state)"
     log_line "$pwm_dir" TRIGGER "$pwm_trigger" || :

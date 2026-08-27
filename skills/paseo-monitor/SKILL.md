@@ -31,8 +31,8 @@ The table below is also emitted by `paseo-monitor kinds` and `paseo-monitor
 
 | Kind | Description | Parameters | Floor | Default interval | Copy-pasteable invocation |
 | --- | --- | --- | --- | --- | --- |
-| `slurm` | Slurm job state | `--host <host> --job <id>` | 120s | 600s terminal-only, 300s transitions | `paseo-monitor watch --kind slurm --host cannon --job 24211558` |
-| `pbs` | PBS job state | `--host <host> --job <id>` | 120s | 600s terminal-only, 300s transitions | `paseo-monitor watch --kind pbs --host polaris --job 123.server` |
+| `slurm` | Slurm job state | `--host <host> --job <id> [--report-transitions] [--report-on <tokens>] [--with-reason]` | 120s | 600s terminal-only, 300s transitions | `paseo-monitor watch --kind slurm --host cannon --job 24211558` |
+| `pbs` | PBS job state | `--host <host> --job <id> [--report-transitions] [--report-on <tokens>]` | 120s | 600s terminal-only, 300s transitions | `paseo-monitor watch --kind pbs --host polaris --job 123.server` |
 | `globus` | Globus transfer status | `--task <id>` | 60s | 300s | `paseo-monitor watch --kind globus --task TASK-ID` |
 | `agent` | Paseo agent status | `--agent <id> [--report-on <tokens>] [--dwell <sweeps>]` | 60s | 60s | `paseo-monitor watch --kind agent --agent AGENT-ID --report-on BLOCKED-PERMISSION,CLOSED,ARCHIVED --dwell 2` |
 | `file-exists` | File existence | `--path <path> [--host <host>]` | 60s local, 120s remote | 60s local, 120s remote | `paseo-monitor watch --kind file-exists --path /scratch/run/receipt --host polaris` |
@@ -75,6 +75,29 @@ The `--context` resume format is required: target id and what changed; Task
 Orchestrator item id; exact full SHA and branch; why or purpose; who owns the
 next action; one evidence line citing an artifact; and prohibitions. `branch`
 and `sha` are recommended label keys for `--label`, never CLI flags.
+
+### Labels, prohibitions, and failsafe
+
+At registration the tool harvests `role`, `job`, `item`, and `lane` from the
+caller's Paseo agent metadata when the CLI exposes them, and echoes them in
+reports. Add other metadata with repeated `--label k=v`; `branch` and `sha`
+are recommended label keys, not dedicated flags. If the installed Paseo CLI
+does not expose labels in `inspect --json`, harvesting is empty and explicit
+`--label` remains the reliable path.
+
+`--prohibit` is an opaque courier field. It is copied into the fixed,
+front-loaded `PROHIBITIONS` report slot and into an optional failsafe prompt;
+the tool does not interpret or enforce it. Use it only for unconditional,
+target-scoped constraints such as “never scancel job 42124320”. Conditional
+or situational constraints belong in Task Orchestrator notes, referenced by a
+pointer. Without the prohibition, a fresh context may helpfully retry.
+
+`--failsafe` creates a bounded one-shot Paseo schedule. Use `--max-runs` and
+`--expires-in` to bound it; the default is one run expiring at the watch
+deadline. The schedule prompt contains only the watch id, the
+`status`/`log` procedure, and the copied prohibition text—never routing or
+state. A clean terminal report removes the schedule. If the failsafe fires,
+run `paseo-monitor status <id>` before anything else.
 
 ## Required liveness ritual
 

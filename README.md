@@ -14,7 +14,8 @@ platform-specific shell features and does not use `jq`, `flock`, `setsid`,
 
 The CLI observes and records without requiring a delivery backend. Reports are
 terminal transitions by default; `--report-transitions` opts into intermediate
-changes. Optional delivery uses one direct-argv backend: `--deliver
+changes, and `--report-on` narrows intermediate reports to selected tokens.
+Optional delivery uses one direct-argv backend: `--deliver
 paseo-queue` pipes the report to `paseo-queue add <report-to>`, while
 `--deliver <command>` pipes it to an arbitrary executable. Delivery failures
 remain recorded in the watch for retry on the next sweep.
@@ -31,6 +32,42 @@ paseo-monitor rm <id> | --all
 paseo-monitor reap
 paseo-monitor _sweep
 ```
+
+Common watch options include `--report-transitions`, `--report-on TOK,TOK`,
+`--label k=v`, `--prohibit TEXT`, `--failsafe`, `--max-runs N`, and
+`--expires-in DURATION`. `--with-reason` is the Slurm reason-detail switch;
+reason tokens in `--report-on` derive it automatically. Slurm and PBS have
+120-second floors; their defaults are 600 seconds terminal-only and 300
+seconds when transitions are enabled. Other kind floors and defaults are
+listed by `paseo-monitor kinds` and in the skill table.
+
+Kind floors and defaults:
+
+| Kind | Floor | Default interval |
+| --- | --- | --- |
+| `slurm` | 120s | 600s terminal-only, 300s transitions |
+| `pbs` | 120s | 600s terminal-only, 300s transitions |
+| `globus` | 60s | 300s |
+| `agent` | 60s | 60s |
+| `file-exists` | 60s local, 120s remote | 60s local, 120s remote |
+| `git-ref` | 60s | 120s |
+| `pr-merge` | 60s | 300s |
+| `script` | 60s | 60s |
+
+`--failsafe` creates a bounded one-shot Paseo schedule in the daemon. Its
+pointer-only prompt contains the watch id, the `status`/`log` procedure, and
+the opaque prohibition text, never routing or state. A clean terminal report
+removes the schedule. Use `--max-runs` and `--expires-in` for explicit bounds;
+without them, one run expires at the watch deadline.
+
+At registration the tool attempts to harvest the caller's `role`, `job`,
+`item`, and `lane` labels from `paseo inspect "$PASEO_AGENT_ID" --json` when
+the CLI exposes them. Some installed CLI versions omit labels; explicit
+`--label k=v` is the reliable fallback. `branch` and `sha` are recommended
+label keys, never dedicated flags. `--prohibit` is a courier, not an
+enforcer: use it only for unconditional target-scoped constraints. Put
+conditional or situational constraints in Task Orchestrator notes and point
+to them.
 
 Registration output states that delivery is best-effort. The caller owns its
 liveness backstop.
