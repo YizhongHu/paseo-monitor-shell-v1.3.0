@@ -547,6 +547,21 @@ pm_slurm_probe_output() {
     fi
     printf '%s %s\n' "$pspo_token" "$pspo_detail" > "$pspo_out"
 }
+pm_git_ref_probe_output() {
+    # pm_git_ref_probe_output <watch-dir> <stdout> -- extract the observed SHA.
+    pgr_dir="$1"
+    pgr_out="$2"
+    pgr_line="$(sed -n '1p' "$pgr_out")"
+    pgr_sha="$(printf '%s\n' "$pgr_line" | cut -f1)"
+    pgr_ref="$(printf '%s\n' "$pgr_line" | cut -f2)"
+    case "$pgr_sha" in
+        ''|*[!0-9A-Fa-f]*) return 1 ;;
+    esac
+    pgr_old="$(cat "$pgr_dir/last" 2>/dev/null || printf '')"
+    [ -n "$pgr_old" ] || pgr_old="$pgr_sha"
+    printf '%s old=%s new=%s ref=%s observed=%s\n' \
+        "$pgr_sha" "$pgr_old" "$pgr_sha" "$pgr_ref" "$pgr_line" > "$pgr_out"
+}
  
 pm_parse_probe_output() {
     ppo_line="$(sed -n '1p' "$1")"
@@ -664,6 +679,10 @@ pm_run_registered_probe() {
         git-ref)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \
                 git ls-remote "$prp_remote" "$prp_ref"
+            prp_rc=$?
+            [ "$prp_rc" -eq 0 ] || return "$prp_rc"
+            pm_git_ref_probe_output "$prp_dir" "$prp_out"
+            return $?
             ;;
         pr-merge)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \

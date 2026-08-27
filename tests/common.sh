@@ -15,7 +15,8 @@ setup() {
     cp "$PMT_MOCK_DIR/paseo" "$SANDBOX/bin/paseo"
     cp "$PMT_MOCK_DIR/paseo-queue" "$SANDBOX/bin/paseo-queue"
     cp "$PMT_MOCK_DIR/ssh" "$SANDBOX/bin/ssh"
-    chmod +x "$SANDBOX/bin/paseo" "$SANDBOX/bin/paseo-queue" "$SANDBOX/bin/ssh"
+    cp "$PMT_MOCK_DIR/git" "$SANDBOX/bin/git"
+    chmod +x "$SANDBOX/bin/paseo" "$SANDBOX/bin/paseo-queue" "$SANDBOX/bin/ssh" "$SANDBOX/bin/git"
     PATH="$SANDBOX/bin:$PATH"
     export PATH
     PASEO_MONITOR_HOME="$SANDBOX/home/.paseo-monitor"
