@@ -16,6 +16,11 @@
     <integer>60</integer>
     <key>RunAtLoad</key>
     <true/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PASEO_MONITOR_HOME</key>
+        <string>__PASEO_MONITOR_HOME__</string>
+    </dict>
     <key>StandardOutPath</key>
     <string>__PASEO_MONITOR_HOME__/launchd.stdout</string>
     <key>StandardErrorPath</key>
