@@ -8,11 +8,15 @@ source_monitor
 unset PM_SOURCE_ONLY
 
 kinds="$($PMT_BIN kinds)"
-assert_grep "$PMT_REPO_ROOT/bin/paseo-monitor" 'file-exists | File existence' "kinds file-exists"
+assert_grep "$PMT_REPO_ROOT/bin/paseo-monitor" 'file-exists | Absence / receipt pattern' "kinds file-exists absence row"
 assert_eq "$(printf '%s\n' "$kinds" | grep -c '^')" 8 "kind count"
 help="$($PMT_BIN --help)"
+printf '%s\n' "$kinds" > "$SANDBOX/kinds"
+assert_grep "$SANDBOX/kinds" 'Absence / receipt pattern' "kinds absence framing"
+assert_grep "$SANDBOX/kinds" 'example: paseo-monitor watch --kind file-exists --path /scratch/run/receipt --deadline +3600' "kinds receipt invocation"
 printf '%s\n' "$help" > "$SANDBOX/help"
 assert_grep "$SANDBOX/help" '--deadline <when>' "help marks deadline required"
+assert_grep "$SANDBOX/help" 'example: paseo-monitor watch --kind file-exists --path /scratch/run/receipt --deadline +3600' "help receipt invocation"
 while IFS= read -r kind_line; do
     case "$help" in
         *"$kind_line"*) ;;

@@ -51,10 +51,18 @@ Kind floors and defaults:
 | `pbs` | 120s | 600s terminal-only, 300s transitions |
 | `globus` | 60s | 300s |
 | `agent` | 60s | 60s; default dwell 2 |
-| `file-exists` | 60s local, 120s remote | 60s local, 120s remote |
+| `file-exists` (absence / receipt pattern) | 60s local, 120s remote | 60s local, 120s remote |
 | `git-ref` | 60s | 120s |
 | `pr-merge` | 60s | 300s |
 | `script` | 60s | 60s |
+
+For an absence / receipt watch, key `file-exists` to a pre-agreed receipt path:
+
+```sh
+paseo-monitor watch --kind file-exists --path /scratch/run/receipt --deadline +3600
+```
+
+Job-id-keyed watches cannot observe a target that never entered the queue.
 
 `--failsafe` creates a bounded one-shot Paseo schedule in the daemon. Its
 pointer-only prompt contains the watch id, the `status`/`log` procedure, and

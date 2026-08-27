@@ -37,7 +37,7 @@ Every watch requires `--deadline <when>`; malformed deadline values are rejected
 | `pbs` | PBS job state | `--host <host> --job <id> [--report-transitions] [--report-on <tokens>] --deadline <when>` | 120s | 600s terminal-only, 300s transitions | `paseo-monitor watch --kind pbs --host polaris --job 123.server --deadline +3600` |
 | `globus` | Globus transfer status | `--task <id> --deadline <when>` | 60s | 300s | `paseo-monitor watch --kind globus --task TASK-ID --deadline +3600` |
 | `agent` | Paseo agent status | `--agent <id> [--report-on <tokens>] [--dwell <sweeps>] --deadline <when>` (default dwell: 2) | 60s | 60s | `paseo-monitor watch --kind agent --agent AGENT-ID --report-on BLOCKED-PERMISSION,CLOSED,ARCHIVED --deadline +3600` |
-| `file-exists` | File existence | `--path <path> [--host <host>] --deadline <when>` | 60s local, 120s remote | 60s local, 120s remote | `paseo-monitor watch --kind file-exists --path /scratch/run/receipt --host polaris --deadline +3600` |
+| `file-exists` | Absence / receipt pattern; job-id-keyed watches cannot observe a target that never entered the queue | `--path <receipt-path> [--host <host>] --deadline <when>` | 60s local, 120s remote | 60s local, 120s remote | `paseo-monitor watch --kind file-exists --path /scratch/run/receipt --deadline +3600` |
 | `git-ref` | Git ref SHA | `--remote <remote> --ref <ref> --deadline <when>` | 60s | 120s | `paseo-monitor watch --kind git-ref --remote ORIGIN --ref refs/heads/main --deadline +3600` |
 | `pr-merge` | Pull request merge state | `--repo <owner/repo> --pr <number> --deadline <when>` | 60s | 300s | `paseo-monitor watch --kind pr-merge --repo OWNER/REPO --pr 123 --deadline +3600` |
 | `script` | Custom executable | `--script <file> --reason "<why no kind fits>" --deadline <when>` | 60s | 60s | `paseo-monitor watch --script ./probe.sh --reason "custom direct-argv check" --terminal DONE --deadline +3600` |
@@ -67,13 +67,18 @@ paseo-monitor watch --script ./probe.sh --reason "the target needs a custom dire
   --terminal DONE --context 'target=custom-id changed=running; item=ITEM-ID; sha=FULL_SHA; branch=BRANCH; purpose=wait for custom result; next-owner=caller; evidence=artifact:/path/to/log; prohibitions=no shell-string execution'
 ```
 
-`file-exists` emits `ABSENT` or `EXISTS`. Use it for the absence pattern:
-key the watch to a pre-agreed receipt or checkpoint path, not to a job id that
-may never exist. An `ABSENT -> EXISTS` edge reports successful appearance;
-`ABSENT` through the deadline produces one deadline event, which covers a
-synchronously rejected submission with no job id. With `--host`, the probe
-uses SSH `BatchMode` and `ConnectTimeout` and follows remote auth parking and
-facility cadence floors.
+`file-exists` emits `ABSENT` or `EXISTS`. Use it as the absence / receipt
+pattern, keyed to a pre-agreed receipt path:
+
+```sh
+paseo-monitor watch --kind file-exists --path /scratch/run/receipt --deadline +3600
+```
+
+Job-id-keyed watches cannot observe a target that never entered the queue.
+An `ABSENT -> EXISTS` edge reports successful appearance; `ABSENT` through the
+deadline produces one deadline event, which covers a synchronously rejected
+submission with no job id. With `--host`, the probe uses SSH `BatchMode` and
+`ConnectTimeout` and follows remote auth parking and facility cadence floors.
 
 The `--context` resume format is required: target id and what changed; Task
 Orchestrator item id; exact full SHA and branch; why or purpose; who owns the
