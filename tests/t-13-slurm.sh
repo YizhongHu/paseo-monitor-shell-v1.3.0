@@ -60,6 +60,7 @@ mock_ssh_script "0${reason_tab}PENDING\\nPASEO_MONITOR_SQUEUE\\nPENDING|Priority
 reason_reg="$($PMT_BIN watch --kind slurm --host cannon --job reason-1 --report-on PENDING:Priority,PENDING:Resources --deadline +300)" || fail "reason registration failed"
 reason_id=$(printf '%s\n' "$reason_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 reason_dir="$PM_HOME/watches/$reason_id"
+assert_eq "$(grep '^interval=' "$reason_dir/spec" | cut -d= -f2)" 300 "transition-reporting Slurm default interval"
 assert_eq "$(cat "$reason_dir/last")" PENDING:Priority "reason compound token"
 assert_grep "$MOCK_DIR/calls.log" 'sacct -X -j' "reason sacct invocation"
 assert_grep "$MOCK_DIR/calls.log" 'squeue -h -j' "reason squeue invocation"
@@ -74,6 +75,7 @@ pm_atomic_write "$reason_dir/nextDue" 9999999999
 # Without reason reporting, squeue is not fetched; an empty sacct observation
 # after RUNNING is not enough evidence for VANISHED.
 mock_ssh_script "0${tab}RUNNING"
+: > "$MOCK_DIR/calls.log"
 off_reg="$($PMT_BIN watch --kind slurm --host cannon --job reason-off --deadline +300)" || fail "reason-off registration failed"
 off_id=$(printf '%s\n' "$off_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 off_dir="$PM_HOME/watches/$off_id"
@@ -81,6 +83,9 @@ mock_ssh_script "0${tab}"
 pm_atomic_write "$off_dir/nextDue" 0
 $PMT_BIN _sweep || fail "reason-off sweep failed"
 assert_eq "$(cat "$off_dir/last")" PENDING "reason-off stable token"
+assert_eq "$(grep '^interval=' "$off_dir/spec" | cut -d= -f2)" 600 "terminal-only Slurm default interval"
+if grep -q 'squeue' "$MOCK_DIR/calls.log"; then fail "reason-off path touched squeue"; fi
+if grep -q ' REPORT ' "$off_dir/log"; then fail "reason-off path emitted spurious edge"; fi
 pm_atomic_write "$off_dir/nextDue" 9999999999
 
 # Both accounting and queue disappearance after an observed running job is VANISHED.
