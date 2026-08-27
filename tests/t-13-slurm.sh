@@ -71,12 +71,13 @@ assert_eq "$(cat "$reason_dir/last")" PENDING:Resources "reason transition token
 assert_grep "$reason_dir/log" 'class=transition' "reason transition report"
 pm_atomic_write "$reason_dir/nextDue" 9999999999
 
-# Without reason reporting, squeue is not fetched and PENDING stays stable.
-mock_ssh_script "0${tab}PENDING"
+# Without reason reporting, squeue is not fetched; an empty sacct observation
+# after RUNNING is not enough evidence for VANISHED.
+mock_ssh_script "0${tab}RUNNING"
 off_reg="$($PMT_BIN watch --kind slurm --host cannon --job reason-off --deadline +300)" || fail "reason-off registration failed"
 off_id=$(printf '%s\n' "$off_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 off_dir="$PM_HOME/watches/$off_id"
-mock_ssh_script "0${tab}PENDING"
+mock_ssh_script "0${tab}"
 pm_atomic_write "$off_dir/nextDue" 0
 $PMT_BIN _sweep || fail "reason-off sweep failed"
 assert_eq "$(cat "$off_dir/last")" PENDING "reason-off stable token"

@@ -498,6 +498,8 @@ pm_slurm_probe_output() {
     pspo_out="$2"
     pspo_sacct="$(sed '/^PASEO_MONITOR_SQUEUE$/,$d' "$pspo_out" | sed '/^[[:space:]]*$/d' | sed -n '1p')"
     pspo_squeue=""
+    pspo_has_squeue=0
+    grep -q '^PASEO_MONITOR_SQUEUE$' "$pspo_out" && pspo_has_squeue=1
     if grep -q '^PASEO_MONITOR_SQUEUE$' "$pspo_out"; then
         pspo_squeue="$(sed -n '/^PASEO_MONITOR_SQUEUE$/,$p' "$pspo_out" | sed '1d' | sed '/^[[:space:]]*$/d' | sed -n '1p')"
     fi
@@ -521,7 +523,8 @@ pm_slurm_probe_output() {
             fi
             pspo_detail="$pspo_detail squeue=$pspo_squeue"
         fi
-    elif [ -n "$(cat "$pspo_dir/last" 2>/dev/null || printf '')" ] &&
+    elif [ "$pspo_has_squeue" -eq 1 ] &&
+        [ -n "$(cat "$pspo_dir/last" 2>/dev/null || printf '')" ] &&
         [ "$(cat "$pspo_dir/last" 2>/dev/null || printf '')" != PENDING ]; then
         pspo_token=VANISHED
         pspo_detail="sacct and squeue empty after last=$(cat "$pspo_dir/last")"
