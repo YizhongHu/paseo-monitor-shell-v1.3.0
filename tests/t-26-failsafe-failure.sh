@@ -21,7 +21,7 @@ exit 2
 EOF
 chmod +x "$SANDBOX/bin/paseo"
 
-registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'failsafe failure' --terminal DONE --no-start-report --failsafe --deadline +300 2>"$SANDBOX/register.err")"
+registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'failsafe failure' --terminal DONE --no-start-report --failsafe --provider claude --deadline +300 2>"$SANDBOX/register.err")"
 registration_rc=$?
 assert_eq "$registration_rc" 0 "failsafe failure registration exit status"
 id=$(printf '%s\n' "$registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')

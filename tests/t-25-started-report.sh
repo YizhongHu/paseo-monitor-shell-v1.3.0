@@ -87,7 +87,7 @@ fi
 
 # A clean start delivery does not release a failsafe schedule.
 printf 'RUNNING\n' > "$SANDBOX/mode"
-failsafe_registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'started failsafe' --terminal DONE --failsafe --max-runs 1 --expires-in 5m --deliver "$SANDBOX/deliver" --deadline +300)" || fail "failsafe registration failed"
+failsafe_registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'started failsafe' --terminal DONE --failsafe --provider claude --max-runs 1 --expires-in 5m --deliver "$SANDBOX/deliver" --deadline +300)" || fail "failsafe registration failed"
 failsafe_id=$(printf '%s\n' "$failsafe_registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 [ -f "$PM_HOME/watches/$failsafe_id/failsafe" ] || fail "clean start delivery cleared failsafe"
 assert_grep "$PM_HOME/watches/$failsafe_id/log" 'REPORT .*class=started' "failsafe start report"

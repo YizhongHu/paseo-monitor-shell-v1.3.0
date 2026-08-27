@@ -36,6 +36,8 @@ PY
 )"
 PM_PY_HARVEST_LABELS='import json,sys; d=json.load(sys.stdin); d=d[0] if isinstance(d,list) and d else d; labels=d.get("Labels",d.get("labels",{})) if isinstance(d,dict) else {}; labels=labels if isinstance(labels,dict) else {}; print("|".join("%s=%s" % (k,str(labels[k]).replace("|"," ").replace("\n"," ")) for k in ("role","job","item","lane") if k in labels and labels[k] is not None))'
 PM_PY_SCHEDULE_ID='import json,sys; d=json.load(sys.stdin); d=d if isinstance(d,dict) else {}; print(d.get("id",d.get("scheduleId",d.get("schedule_id",""))))'
+PM_PY_CALLER_PROVIDER='import json,sys; d=json.load(sys.stdin); print(d.get("Provider",d.get("provider","")) if isinstance(d,dict) else "")'
+PM_PY_DEFAULT_PROVIDER='import json,sys; d=json.load(sys.stdin); print(next((str(x.get("provider","")) for x in d if isinstance(x,dict) and str(x.get("status","")).lower()=="available" and str(x.get("enabled","")).lower()=="enabled"),"") if isinstance(d,list) else "")'
 
 LC_ALL=C
 export LC_ALL
@@ -66,6 +68,7 @@ Subcommands:
       [--report-to <agent>] [--interval <s>] --deadline <when> \
       [--terminal TOK,TOK] [--report-on TOK,TOK] [--report-transitions] \
       [--with-reason] [--dwell <n-sweeps>] [--label k=v ...] \
+      [--provider <provider>] [--interval <s>] --deadline <when> \
       [--prohibit <text>] [--failsafe] [--max-fires <n>] \
       [--max-runs <n>] [--expires-in <duration>] [--no-start-report] \
       [--deliver paseo-queue|<command>]
@@ -929,13 +932,34 @@ pm_paseo_bin() {
     return 0
 }
 
+pm_discover_provider() {
+    pdp_provider=""
+    pm_resolve_binary paseo 2>/dev/null || return 1
+    pdp_paseo="$PM_RESOLVED_BINARY"
+    if [ -n "${PASEO_AGENT_ID:-}" ]; then
+        pdp_json="$("$pdp_paseo" inspect "$PASEO_AGENT_ID" --json 2>/dev/null || printf '')"
+        [ -n "$pdp_json" ] && pdp_provider="$(printf '%s' "$pdp_json" | python3 -c "$PM_PY_CALLER_PROVIDER" 2>/dev/null || printf '')"
+    fi
+    if [ -z "$pdp_provider" ]; then
+        pdp_json="$("$pdp_paseo" provider ls --json 2>/dev/null || printf '')"
+        [ -n "$pdp_json" ] && pdp_provider="$(printf '%s' "$pdp_json" | python3 -c "$PM_PY_DEFAULT_PROVIDER" 2>/dev/null || printf '')"
+    fi
+    [ -n "$pdp_provider" ] || return 1
+    printf '%s\n' "$pdp_provider"
+}
+
 pm_schedule_create() {
-    # pm_schedule_create <watch-dir> <every> <max-runs> <expires-in> <prompt>.
+    # pm_schedule_create <watch-dir> <every> <max-runs> <expires-in> <prompt> <provider>.
     psc_dir="$1"
     psc_every="$2"
     psc_max_runs="$3"
     psc_expires="$4"
     psc_prompt="$5"
+    psc_provider="$6"
+    [ -n "$psc_provider" ] || {
+        PM_SCHEDULE_ERROR=PROVIDER_UNAVAILABLE
+        return 2
+    }
     PM_SCHEDULE_ERROR=""
     psc_out="$psc_dir/.failsafe.stdout"
     psc_err="$psc_dir/.failsafe.stderr"
@@ -946,7 +970,8 @@ pm_schedule_create() {
     }
     pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$psc_out" "$psc_err" \
         "$PM_PASEO_BIN" schedule create "$psc_prompt" --every "$psc_every" \
-        --max-runs "$psc_max_runs" --expires-in "$psc_expires" --json
+        --max-runs "$psc_max_runs" --expires-in "$psc_expires" \
+        --provider "$psc_provider" --json
     psc_rc=$?
     if [ "$psc_rc" -ne 0 ]; then
         PM_SCHEDULE_ERROR="$(sed -n 's/.*\(MISSING_PROVIDER\).*/\1/p' "$psc_err" 2>/dev/null | sed -n '1p')"
@@ -1341,6 +1366,7 @@ pm_watch_main() {
     pwm_script=""
     pwm_reason=""
     pwm_report_to="${PASEO_AGENT_ID:-}"
+    pwm_provider=""
     pwm_interval=""
     pwm_deadline=""
     pwm_terminal="$PM_DEFAULT_TERMINAL"
@@ -1378,6 +1404,7 @@ pm_watch_main() {
             --script) [ "$#" -ge 2 ] || { echo "paseo-monitor: --script needs a value" >&2; return 2; }; pwm_script="$2"; shift 2 ;;
             --reason) [ "$#" -ge 2 ] || { echo "paseo-monitor: --reason needs a value" >&2; return 2; }; pwm_reason="$2"; shift 2 ;;
             --report-to) [ "$#" -ge 2 ] || { echo "paseo-monitor: --report-to needs a value" >&2; return 2; }; pwm_report_to="$2"; shift 2 ;;
+            --provider) [ "$#" -ge 2 ] || { echo "paseo-monitor: --provider needs a value" >&2; return 2; }; pwm_provider="$2"; shift 2 ;;
             --interval) [ "$#" -ge 2 ] || { echo "paseo-monitor: --interval needs a value" >&2; return 2; }; pwm_interval="$2"; shift 2 ;;
             --deadline) [ "$#" -ge 2 ] || { echo "paseo-monitor: --deadline is required" >&2; return 2; }; pwm_deadline="$2"; shift 2 ;;
             --terminal) [ "$#" -ge 2 ] || { echo "paseo-monitor: --terminal needs a value" >&2; return 2; }; pwm_terminal="$2"; pwm_terminal_set=1; shift 2 ;;
@@ -1498,6 +1525,7 @@ pm_watch_main() {
     fi
     pwm_spec="kind=$pwm_kind
 report_to=$pwm_report_to
+provider=$pwm_provider
 interval=$pwm_interval
 deadline=$pwm_deadline_epoch
 registered=$pwm_now
@@ -1549,13 +1577,17 @@ labels=$pwm_labels"
     pwm_next="$(pm_next_due "$pwm_now" "$pwm_interval" "$pwm_id")"
     pm_atomic_write "$pwm_dir/nextDue" "$pwm_next" || { rm -rf "$pwm_dir"; return 1; }
     if [ "$pwm_failsafe" -eq 1 ]; then
+        if [ -z "$pwm_provider" ]; then
+            pwm_provider="$(pm_discover_provider 2>/dev/null || printf '')"
+        fi
+        [ -n "$pwm_provider" ] && pm_spec_backfill "$pwm_dir" provider "$pwm_provider" || :
         pwm_failsafe_expires="$pwm_expires_in"
         if [ -z "$pwm_failsafe_expires" ]; then
             pwm_failsafe_delay=$((pwm_deadline_epoch - pwm_now))
             pwm_failsafe_expires="${pwm_failsafe_delay}s"
         fi
         pwm_failsafe_prompt="paseo-monitor status $pwm_id before anything else; then inspect paseo-monitor log $pwm_id. PROHIBITIONS: ${pwm_prohibit:-"(none)"}"
-        if ! pm_schedule_create "$pwm_dir" "$pwm_failsafe_expires" "$pwm_max_runs" "$pwm_failsafe_expires" "$pwm_failsafe_prompt"; then
+        if ! pm_schedule_create "$pwm_dir" "$pwm_failsafe_expires" "$pwm_max_runs" "$pwm_failsafe_expires" "$pwm_failsafe_prompt" "$pwm_provider"; then
             printf 'paseo-monitor: WARN failsafe schedule not created (%s); caller owns the liveness backstop\n' \
                 "${PM_SCHEDULE_ERROR:-SCHEDULE_CREATE_FAILED}" >&2
         fi

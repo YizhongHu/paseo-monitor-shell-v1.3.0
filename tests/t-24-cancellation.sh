@@ -64,7 +64,7 @@ assert_grep "$MOCK_DIR/reports" "watch=$all_one_id.*class=cancelled" "bulk first
 assert_grep "$MOCK_DIR/reports" "watch=$all_two_id.*class=cancelled" "bulk second cancellation"
 
 # Removing a failsafe watch releases the daemon schedule before its directory vanishes.
-failsafe_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'rm failsafe cleanup' --terminal DONE --no-start-report --failsafe --max-runs 1 --expires-in 5m --deliver "$SANDBOX/deliver" --deadline +300)" || fail "rm failsafe registration failed"
+failsafe_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'rm failsafe cleanup' --terminal DONE --no-start-report --failsafe --provider claude --max-runs 1 --expires-in 5m --deliver "$SANDBOX/deliver" --deadline +300)" || fail "rm failsafe registration failed"
 failsafe_id=$(printf '%s\n' "$failsafe_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 failsafe_dir="$PM_HOME/watches/$failsafe_id"
 failsafe_schedule=$(cat "$failsafe_dir/failsafe")
@@ -75,7 +75,7 @@ assert_grep "$MOCK_DIR/calls.log" "paseo schedule delete $failsafe_schedule" "rm
 
 # Reaping an old terminal watch releases its schedule but remains silent.
 : > "$MOCK_DIR/reports"
-reap_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'reap failsafe cleanup' --terminal DONE --no-start-report --failsafe --max-runs 1 --expires-in 5m --deliver "$SANDBOX/deliver" --deadline +300)" || fail "reap failsafe registration failed"
+reap_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'reap failsafe cleanup' --terminal DONE --no-start-report --failsafe --provider claude --max-runs 1 --expires-in 5m --deliver "$SANDBOX/deliver" --deadline +300)" || fail "reap failsafe registration failed"
 reap_id=$(printf '%s\n' "$reap_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 reap_dir="$PM_HOME/watches/$reap_id"
 reap_schedule=$(cat "$reap_dir/failsafe")
@@ -99,7 +99,7 @@ else
 fi
 EOF
 chmod +x "$SANDBOX/minimal-probe"
-minimal_reg="$($PMT_BIN watch --script "$SANDBOX/minimal-probe" --reason 'minimal PATH cleanup' --terminal DONE --no-start-report --failsafe --max-runs 1 --expires-in 5m --deliver "$SANDBOX/deliver" --deadline +300)" || fail "minimal PATH registration failed"
+minimal_reg="$($PMT_BIN watch --script "$SANDBOX/minimal-probe" --reason 'minimal PATH cleanup' --terminal DONE --no-start-report --failsafe --provider claude --max-runs 1 --expires-in 5m --deliver "$SANDBOX/deliver" --deadline +300)" || fail "minimal PATH registration failed"
 minimal_id=$(printf '%s\n' "$minimal_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 minimal_dir="$PM_HOME/watches/$minimal_id"
 minimal_schedule=$(cat "$minimal_dir/failsafe")

@@ -20,7 +20,7 @@ EOF
 chmod +x "$SANDBOX/deliver"
 
 mock_ssh_script "0${tab}COMPLETED"
-script_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'terminal registration test' --terminal DONE --report-transitions --max-fires 1 --failsafe --max-runs 1 --expires-in 5m --deliver "$SANDBOX/deliver" --deadline +1)" || fail "terminal script registration failed"
+script_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'terminal registration test' --terminal DONE --report-transitions --max-fires 1 --failsafe --provider claude --max-runs 1 --expires-in 5m --deliver "$SANDBOX/deliver" --deadline +1)" || fail "terminal script registration failed"
 script_id=$(printf '%s\n' "$script_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 script_dir="$PM_HOME/watches/$script_id"
 assert_eq "$(cat "$script_dir/last")" DONE "script terminal token recorded"

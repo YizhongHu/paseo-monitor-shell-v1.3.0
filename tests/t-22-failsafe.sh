@@ -18,12 +18,12 @@ cat > "$MOCK_DIR/report"
 EOF
 chmod +x "$SANDBOX/deliver"
 prohibit='never scancel job 42124320'
-registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'failsafe test' --terminal DONE --failsafe --max-runs 1 --expires-in 5m --prohibit "$prohibit" --deliver "$SANDBOX/deliver" --deadline +300)" || fail "failsafe registration failed"
+registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'failsafe test' --terminal DONE --failsafe --provider claude --max-runs 1 --expires-in 5m --prohibit "$prohibit" --deliver "$SANDBOX/deliver" --deadline +300)" || fail "failsafe registration failed"
 id=$(printf '%s\n' "$registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 dir="$PM_HOME/watches/$id"
 schedule_id=$(cat "$dir/failsafe")
 [ -n "$schedule_id" ] || fail "failsafe schedule id missing"
-assert_grep "$MOCK_DIR/calls.log" 'paseo schedule create .*--every 5m --max-runs 1 --expires-in 5m --json' "bounded schedule create"
+assert_grep "$MOCK_DIR/calls.log" 'paseo schedule create .*--every 5m --max-runs 1 --expires-in 5m --provider claude --json' "bounded schedule create"
 prompt_file="$MOCK_DIR/schedule.$schedule_id"
 assert_grep "$prompt_file" "status $id" "pointer-only watch id"
 assert_grep "$prompt_file" "$prohibit" "failsafe prohibition"
