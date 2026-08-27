@@ -18,6 +18,22 @@ case "$PM_PROBE_TIMEOUT" in ''|*[!0-9]*) PM_PROBE_TIMEOUT=45 ;; esac
 PM_LAUNCHD_LABEL=com.paseo-monitor.sweep
 PM_INSTALLER="${PASEO_MONITOR_INSTALLER:-$(dirname "$0")/../install.sh}"
 PM_PY_AGENT_PROBE='import json,sys; d=json.load(sys.stdin); status=str(d.get("Status",d.get("status","UNKNOWN"))).upper(); archived=bool(d.get("Archived",d.get("archived",False))) or bool(d.get("ArchivedAt",d.get("archivedAt",""))); perms=d.get("PendingPermissions",d.get("pendingPermissions",[])); perms=perms if isinstance(perms,list) else []; updated=d.get("UpdatedAt",d.get("updatedAt","")); token="ARCHIVED" if archived else ("BLOCKED-PERMISSION" if perms else status); prefix="went idle " if token=="IDLE" else ""; idle=(" idle_since="+str(updated)) if token=="IDLE" else ""; print("%s %sstatus=%s archived=%s pendingPermissions=%d queue_depth=%d updated_at=%s%s" % (token,prefix,status,str(archived).lower(),len(perms),len(perms),str(updated),idle))'
+PM_PY_GLOBUS_PROBE="$(cat <<'PY'
+import json, sys
+data = json.load(sys.stdin)
+status = str(data.get("status", data.get("Status", "UNKNOWN"))).upper()
+def field(name):
+    value = data.get(name, "")
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, separators=(",", ":"))
+    return str(value).replace("\n", " ")
+print("%s nice_status=%s faults=%s fatal_error=%s effective_bytes_per_second=%s" % (
+    status, field("nice_status"), field("faults"), field("fatal_error"),
+    field("effective_bytes_per_second")))
+PY
+)"
 
 LC_ALL=C
 export LC_ALL
@@ -647,7 +663,12 @@ pm_run_registered_probe() {
             ;;
         globus)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \
-                globus task show "$prp_task" -F json --jq status
+                globus task show "$prp_task" -F json --jq '{status: .status, nice_status: .nice_status, faults: .faults, fatal_error: .fatal_error, effective_bytes_per_second: .effective_bytes_per_second}'
+            prp_rc=$?
+            [ "$prp_rc" -eq 0 ] || return "$prp_rc"
+            prp_globus_line="$(python3 -c "$PM_PY_GLOBUS_PROBE" < "$prp_out" 2>>"$prp_err")" || return 1
+            printf '%s\n' "$prp_globus_line" > "$prp_out"
+            return 0
             ;;
         agent)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \
