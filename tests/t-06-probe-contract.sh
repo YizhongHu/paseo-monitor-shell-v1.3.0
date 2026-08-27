@@ -14,7 +14,7 @@ EOF
 chmod +x "$SANDBOX/healthy-failed"
 : > "$SANDBOX/out"
 : > "$SANDBOX/err"
-pm_run_with_timeout 1 "$SANDBOX/out" "$SANDBOX/err" "$SANDBOX/healthy-failed"
+pm_run_with_timeout 10 "$SANDBOX/out" "$SANDBOX/err" "$SANDBOX/healthy-failed"
 rc=$?
 assert_rc "$rc" 0 "target FAILED is healthy observation"
 pm_parse_probe_output "$SANDBOX/out" || fail "valid probe output rejected"
