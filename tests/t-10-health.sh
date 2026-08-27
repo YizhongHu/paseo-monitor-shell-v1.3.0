@@ -84,6 +84,23 @@ $PMT_BIN _sweep || fail "config strike failed"
 assert_eq "$(cat "$config_dir/health")" '1 config' "rc=127 config class"
 assert_grep "$config_dir/log" 'PROBE-FAIL class=config count=1 rc=127' "config failure evidence"
 if grep -q 'class=network.*rc=127' "$config_dir/log"; then fail "rc=127 classified as network"; fi
+pm_atomic_write "$config_dir/nextDue" 0
+$PMT_BIN _sweep || fail "config strike two failed"
+pm_atomic_write "$config_dir/nextDue" 0
+$PMT_BIN _sweep || fail "config strike three failed"
+assert_eq "$(cat "$config_dir/health")" '3 config' "config health strikes"
+assert_eq "$(cat "$config_dir/state")" parked "config failure parks"
+assert_grep "$config_dir/log" 'PARKED config failures=3' "config park evidence"
+pm_atomic_write "$config_dir/spec" "$(sed 's/^deadline=.*/deadline=1/' "$config_dir/spec")"
+$PMT_BIN _sweep || fail "parked config deadline sweep failed"
+assert_eq "$(cat "$config_dir/state")" expired "parked config deadline expiry"
+assert_grep "$config_dir/log" 'REPORT .*class=deadline' "parked config deadline report"
+printf 'RUNNING\n' > "$SANDBOX/mode"
+pm_atomic_write "$config_dir/spec" "$(sed 's/^deadline=.*/deadline=9999999999/' "$config_dir/spec")"
+pm_atomic_write "$config_dir/state" parked
+$PMT_BIN poke "$config_id" || fail "config poke failed"
+assert_eq "$(cat "$config_dir/state")" active "config poke resumes park"
+assert_eq "$(cat "$config_dir/health")" '0 healthy' "config poke healthy observation"
 # Network failures back off but never park.
 printf 'RUNNING\n' > "$SANDBOX/mode"
 network_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'network test' --terminal DONE --deadline +300)" || fail "network registration failed"

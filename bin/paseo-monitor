@@ -1098,11 +1098,13 @@ pm_sweep_watch() {
             pm_valid_uint "$psw_count" || psw_count=0
             psw_count=$((psw_count + 1))
             pm_atomic_write "$psw_dir/health" "$psw_count $psw_class" || :
-            if [ "$psw_class" = auth ] || [ "$psw_count" -ge 3 ]; then
-                if [ "$psw_class" = auth ] && [ "$psw_count" -ge 3 ]; then
-                    pm_report_event "$psw_dir" health "$psw_old" UNOBSERVABLE "class=auth count=$psw_count rc=$psw_rc" || :
-                    set_state "$psw_dir" parked || :
-                    log_line "$psw_dir" PARKED "auth failures=$psw_count" || :
+            if [ "$psw_class" = auth ] || [ "$psw_class" = config ] || [ "$psw_count" -ge 3 ]; then
+                if [ "$psw_class" = auth ] || [ "$psw_class" = config ]; then
+                    if [ "$psw_count" -ge 3 ]; then
+                        pm_report_event "$psw_dir" health "$psw_old" UNOBSERVABLE "class=$psw_class count=$psw_count rc=$psw_rc" || :
+                        set_state "$psw_dir" parked || :
+                        log_line "$psw_dir" PARKED "$psw_class failures=$psw_count" || :
+                    fi
                 elif [ "$psw_class" = network ] && [ "$psw_count" -ge 3 ]; then
                     pm_report_event "$psw_dir" health "$psw_old" UNOBSERVABLE "class=network count=$psw_count rc=$psw_rc" || :
                 fi
