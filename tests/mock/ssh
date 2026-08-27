@@ -8,8 +8,14 @@ if [ -f "$MOCK_DIR/ssh.script" ]; then
     mv "$MOCK_DIR/ssh.script.next" "$MOCK_DIR/ssh.script"
 fi
 ssh_rc="${ssh_line%%$(printf '\t')*}"
-ssh_output="${ssh_line#*$(printf '\t')}"
+ssh_rest="${ssh_line#*$(printf '\t')}"
+ssh_output="${ssh_rest%%$(printf '\t')*}"
+ssh_err="${ssh_rest#*$(printf '\t')}"
+case "$ssh_line" in *"$(printf '\t')"*) ;; *) ssh_output="${MOCK_SSH_OUTPUT:-}"; ssh_err="" ;; esac
+case "$ssh_rest" in *"$(printf '\t')"*) ;; *) ssh_err="" ;; esac
+case "$ssh_output" in *'\\n'*) ssh_output="$(printf '%b\n' "$ssh_output")" ;; esac
+case "$ssh_err" in *'\\n'*) ssh_err="$(printf '%b\n' "$ssh_err")" ;; esac
 case "$ssh_rc" in ''|*[!0-9]*) ssh_rc=0 ;; esac
-[ "$ssh_line" = "$ssh_rc" ] && ssh_output="${MOCK_SSH_OUTPUT:-}"
 printf '%s\n' "$ssh_output"
+[ -n "$ssh_err" ] && printf '%s\n' "$ssh_err" >&2
 exit "$ssh_rc"

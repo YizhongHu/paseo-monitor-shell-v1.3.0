@@ -458,6 +458,80 @@ pm_run_with_timeout() {
     return "$pmt_rc"
 }
  
+pm_remote_shell_quote() {
+    # pm_remote_shell_quote <value> -- quote one value for an SSH remote shell.
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+pm_run_remote_probe() {
+    # pm_run_remote_probe <stdout> <stderr> <host> <remote argv...>.
+    # Normalize ssh-level rc=255 while preserving the existing health path.
+    prr_out="$1"
+    prr_err="$2"
+    prr_host="$3"
+    shift 3
+    pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prr_out" "$prr_err" \
+        ssh -o BatchMode=yes -o ConnectTimeout=15 "$prr_host" "$@"
+    prr_rc=$?
+    if [ "$prr_rc" -eq 255 ]; then
+        prr_err_text="$(cat "$prr_err" 2>/dev/null || printf '')"
+        case "$prr_err_text" in
+            *[Aa]uthentication*|*[Pp]ermission\ denied*|*[Pp]assphrase*|*[Pp]assword*|*[Vv]erification*|*[Mm][Ff][Aa]*|*keyboard-interactive*)
+                prr_class=auth
+                ;;
+            *)
+                prr_class=network
+                ;;
+        esac
+        {
+            printf '%s-class ssh-rc=255\n' "$prr_class"
+            [ -n "$prr_err_text" ] && printf '%s\n' "$prr_err_text"
+        } > "$prr_err.classified.$$"
+        mv -f "$prr_err.classified.$$" "$prr_err"
+    fi
+    return "$prr_rc"
+}
+
+pm_slurm_probe_output() {
+    # pm_slurm_probe_output <watch-dir> <stdout> -- map sacct/squeue artifacts.
+    pspo_dir="$1"
+    pspo_out="$2"
+    pspo_sacct="$(sed '/^PASEO_MONITOR_SQUEUE$/,$d' "$pspo_out" | sed '/^[[:space:]]*$/d' | sed -n '1p')"
+    pspo_squeue=""
+    if grep -q '^PASEO_MONITOR_SQUEUE$' "$pspo_out"; then
+        pspo_squeue="$(sed -n '/^PASEO_MONITOR_SQUEUE$/,$p' "$pspo_out" | sed '1d' | sed '/^[[:space:]]*$/d' | sed -n '1p')"
+    fi
+    pspo_state="$pspo_sacct"
+    if [ -z "$pspo_state" ] && [ -n "$pspo_squeue" ]; then
+        pspo_state="${pspo_squeue%%|*}"
+    fi
+    case "$pspo_state" in
+        *'|'*) pspo_state="${pspo_state#*|}"; pspo_state="${pspo_state%%|*}" ;;
+    esac
+    pspo_state="${pspo_state%% *}"
+    if [ -n "$pspo_state" ]; then
+        pspo_token="$pspo_state"
+        pspo_detail="sacct=$pspo_sacct"
+        if [ -n "$pspo_squeue" ]; then
+            pspo_sq_state="${pspo_squeue%%|*}"
+            pspo_sq_reason="${pspo_squeue#*|}"
+            if [ "$pspo_sq_state" = "$pspo_squeue" ]; then pspo_sq_reason="" ; fi
+            if [ "$pspo_sq_state" = PENDING ] && [ -n "$pspo_sq_reason" ]; then
+                pspo_token="PENDING:$pspo_sq_reason"
+            fi
+            pspo_detail="$pspo_detail squeue=$pspo_squeue"
+        fi
+    elif [ -n "$(cat "$pspo_dir/last" 2>/dev/null || printf '')" ] &&
+        [ "$(cat "$pspo_dir/last" 2>/dev/null || printf '')" != PENDING ]; then
+        pspo_token=VANISHED
+        pspo_detail="sacct and squeue empty after last=$(cat "$pspo_dir/last")"
+    else
+        pspo_token=PENDING
+        pspo_detail="sacct empty (accounting lag); squeue=$pspo_squeue"
+    fi
+    printf '%s %s\n' "$pspo_token" "$pspo_detail" > "$pspo_out"
+}
+ 
 pm_parse_probe_output() {
     ppo_line="$(sed -n '1p' "$1")"
     [ -n "$ppo_line" ] || return 1
@@ -484,13 +558,22 @@ pm_run_registered_probe() {
     prp_ref="$(pm_spec_value ref "$prp_dir/spec")"
     prp_repo="$(pm_spec_value repo "$prp_dir/spec")"
     prp_pr="$(pm_spec_value pr "$prp_dir/spec")"
+    prp_with_reason="$(pm_spec_value with_reason "$prp_dir/spec")"
     case "$prp_kind" in
         script)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" "$prp_dir/probe"
             ;;
         slurm)
-            pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \
-                ssh -o BatchMode=yes -o ConnectTimeout=15 "$prp_host" \
+            if [ "$prp_with_reason" = 1 ]; then
+                prp_job_q="$(pm_remote_shell_quote "$prp_job")"
+                prp_slurm_cmd="sacct -X -j $prp_job_q --parsable2 --noheader --format=State; prp_sacct_rc=\$?; printf '\\nPASEO_MONITOR_SQUEUE\\n'; squeue -h -j $prp_job_q -o '%T|%R'; prp_squeue_rc=\$?; [ \$prp_sacct_rc -eq 0 ] && [ \$prp_squeue_rc -eq 0 ]"
+                pm_run_remote_probe "$prp_out" "$prp_err" "$prp_host" "$prp_slurm_cmd"
+                prp_rc=$?
+                [ "$prp_rc" -eq 0 ] || return "$prp_rc"
+                pm_slurm_probe_output "$prp_dir" "$prp_out"
+                return 0
+            fi
+            pm_run_remote_probe "$prp_out" "$prp_err" "$prp_host" \
                 sacct -X -j "$prp_job" --parsable2 --noheader --format=State
             ;;
         globus)
@@ -508,8 +591,7 @@ pm_run_registered_probe() {
             ;;
         file)
             if [ -n "$prp_host" ]; then
-                pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \
-                    ssh -o BatchMode=yes -o ConnectTimeout=15 "$prp_host" \
+                pm_run_remote_probe "$prp_out" "$prp_err" "$prp_host" \
                     ls -d "$prp_path"
             else
                 pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \
