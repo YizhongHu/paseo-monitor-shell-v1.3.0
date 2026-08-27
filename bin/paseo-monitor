@@ -660,6 +660,20 @@ pm_kind_helper() {
     esac
 }
 
+pm_spec_backfill() {
+    # pm_spec_backfill <dir> <key> <value> -- add or replace one spec key in place.
+    psb_dir="$1"
+    psb_key="$2"
+    psb_val="$3"
+    [ -f "$psb_dir/spec" ] || return 1
+    psb_new="$(awk -v k="$psb_key" -v v="$psb_val" '
+        index($0, k "=") == 1 { print k "=" v; found = 1; next }
+        { print }
+        END { if (!found) print k "=" v }
+    ' "$psb_dir/spec")" || return 1
+    pm_atomic_write "$psb_dir/spec" "$psb_new"
+}
+
 
 pm_agent_dwell_accept() {
     # pm_agent_dwell_accept <watch-dir> <token> -- return 1 while candidate is dwelling.
@@ -712,6 +726,19 @@ pm_run_registered_probe() {
     prp_with_reason="$(pm_spec_value with_reason "$prp_dir/spec")"
     prp_helper="$(pm_spec_value helper "$prp_dir/spec")"
     prp_python="$(pm_spec_value python "$prp_dir/spec")"
+    # Watches registered before helper snapshotting carry no helper=/python= in
+    # their spec. Resolve once from the current environment and back-fill, so a
+    # pre-existing watch recovers instead of exec'ing an empty string (rc 127)
+    # on every sweep forever. Newly registered watches never reach this path.
+    if [ -z "$prp_helper" ]; then
+        pm_kind_helper "$prp_kind" || return 127
+        prp_helper="$PM_RESOLVED_BINARY"
+        [ -z "$prp_helper" ] || pm_spec_backfill "$prp_dir" helper "$prp_helper" || :
+    fi
+    if [ -z "$prp_python" ] && pm_resolve_binary python3 2>/dev/null; then
+        prp_python="$PM_RESOLVED_BINARY"
+        pm_spec_backfill "$prp_dir" python "$prp_python" || :
+    fi
     case "$prp_kind" in
         script)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" "$prp_dir/probe"

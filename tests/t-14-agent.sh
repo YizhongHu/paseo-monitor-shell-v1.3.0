@@ -26,6 +26,19 @@ pm_atomic_write "$agent_dir/nextDue" 0
 pmt_sweep_minimal_path || fail "absolute helper sweep failed under minimal PATH"
 assert_eq "$(cat "$agent_dir/last")" RUNNING "absolute helper executed without PATH"
 
+# A watch registered before helper snapshotting has no helper= in its spec.
+# It must recover by resolving from the current environment and back-filling,
+# not exec an empty string and fail rc=127 on every sweep forever.
+legacy_spec="$(grep -v '^helper=' "$agent_dir/spec")"
+pm_atomic_write "$agent_dir/spec" "$legacy_spec"
+assert_eq "$(sed -n 's/^helper=//p' "$agent_dir/spec")" "" "legacy spec has no helper"
+pm_atomic_write "$agent_dir/nextDue" 0
+$PMT_BIN _sweep || fail "legacy spec sweep failed"
+assert_eq "$(sed -n 's/^helper=//p' "$agent_dir/spec")" "$SANDBOX/bin/paseo" "legacy spec back-filled with absolute helper"
+assert_eq "$(cat "$agent_dir/health")" '0 healthy' "legacy spec recovered instead of rc=127"
+pm_atomic_write "$agent_dir/nextDue" 0
+pmt_sweep_minimal_path || fail "back-filled legacy watch failed under minimal PATH"
+
 cat > "$MOCK_DIR/inspect.json" <<'EOF'
 {"Status":"running","Archived":false,"PendingPermissions":[],"UpdatedAt":"2026-08-27T01:08:09Z"}
 EOF
