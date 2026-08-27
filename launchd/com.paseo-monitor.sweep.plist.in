@@ -20,6 +20,8 @@
     <dict>
         <key>PASEO_MONITOR_HOME</key>
         <string>__PASEO_MONITOR_HOME__</string>
+        <key>PATH</key>
+        <string>__PASEO_MONITOR_PATH__</string>
     </dict>
     <key>StandardOutPath</key>
     <string>__PASEO_MONITOR_HOME__/launchd.stdout</string>

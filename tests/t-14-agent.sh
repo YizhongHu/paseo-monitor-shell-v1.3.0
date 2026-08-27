@@ -16,6 +16,20 @@ agent_dir="$PM_HOME/watches/$agent_id"
 assert_eq "$(cat "$agent_dir/last")" RUNNING "agent running token"
 assert_grep "$agent_dir/detail" 'updated_at=2026-08-27T01:02:03Z' "agent updated_at detail"
 assert_grep "$agent_dir/spec" 'dwell=2' "agent dwell persisted"
+agent_helper="$(sed -n 's/^helper=//p' "$agent_dir/spec")"
+assert_eq "$agent_helper" "$SANDBOX/bin/paseo" "agent helper snapshotted as absolute path"
+agent_rich_path="$PATH"
+if PATH=/usr/bin:/bin:/usr/sbin:/sbin "$PMT_BIN" watch --kind agent --agent agent-1 --deadline +300 2>"$SANDBOX/missing-helper.err"; then
+    fail "agent registration succeeded without paseo"
+fi
+assert_grep "$SANDBOX/missing-helper.err" 'required helper not found: paseo' "missing helper names binary"
+pm_atomic_write "$agent_dir/nextDue" 0
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+$PMT_BIN _sweep || fail "absolute helper sweep failed under minimal PATH"
+PATH="$agent_rich_path"
+export PATH
+assert_eq "$(cat "$agent_dir/last")" RUNNING "absolute helper executed without PATH"
 
 # A one-sweep running/idle flap is held as a candidate and not reported.
 cat > "$MOCK_DIR/inspect.json" <<'EOF'

@@ -607,6 +607,59 @@ pm_parse_probe_output() {
     PM_PARSED_DETAIL="$ppo_detail"
     return 0
 }
+pm_resolve_binary() {
+    # pm_resolve_binary <name> -- resolve one executable to an absolute path.
+    prb_name="$1"
+    case "$prb_name" in
+        /*)
+            [ -x "$prb_name" ] || {
+                printf 'paseo-monitor: required helper not found: %s\n' "$prb_name" >&2
+                return 1
+            }
+            PM_RESOLVED_BINARY="$prb_name"
+            return 0
+            ;;
+        */*)
+            [ -x "$prb_name" ] || {
+                printf 'paseo-monitor: required helper not found: %s\n' "$prb_name" >&2
+                return 1
+            }
+            prb_dir="${prb_name%/*}"
+            prb_base="${prb_name##*/}"
+            prb_abs_dir="$(CDPATH= cd -P -- "$prb_dir" 2>/dev/null && pwd)" || return 1
+            PM_RESOLVED_BINARY="$prb_abs_dir/$prb_base"
+            return 0
+            ;;
+    esac
+    prb_old_ifs="$IFS"
+    IFS=:
+    for prb_dir in ${PATH:-}; do
+        [ -n "$prb_dir" ] || prb_dir=.
+        [ -x "$prb_dir/$prb_name" ] || continue
+        case "$prb_dir" in
+            /*) PM_RESOLVED_BINARY="$prb_dir/$prb_name" ;;
+            *) prb_abs_dir="$(CDPATH= cd -P -- "$prb_dir" 2>/dev/null && pwd)" || continue
+                PM_RESOLVED_BINARY="$prb_abs_dir/$prb_name" ;;
+        esac
+        IFS="$prb_old_ifs"
+        return 0
+    done
+    IFS="$prb_old_ifs"
+    printf 'paseo-monitor: required helper not found: %s\n' "$prb_name" >&2
+    return 1
+}
+
+pm_kind_helper() {
+    # pm_kind_helper <kind> -- resolve helpers required by a bundled kind.
+    pkh_kind="$1"
+    case "$pkh_kind" in
+        agent) pm_resolve_binary paseo ;;
+        globus) pm_resolve_binary globus ;;
+        pr-merge) pm_resolve_binary gh ;;
+        *) PM_RESOLVED_BINARY="" ;;
+    esac
+}
+
 
 pm_agent_dwell_accept() {
     # pm_agent_dwell_accept <watch-dir> <token> -- return 1 while candidate is dwelling.
@@ -657,6 +710,7 @@ pm_run_registered_probe() {
     prp_repo="$(pm_spec_value repo "$prp_dir/spec")"
     prp_pr="$(pm_spec_value pr "$prp_dir/spec")"
     prp_with_reason="$(pm_spec_value with_reason "$prp_dir/spec")"
+    prp_helper="$(pm_spec_value helper "$prp_dir/spec")"
     case "$prp_kind" in
         script)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" "$prp_dir/probe"
@@ -688,7 +742,7 @@ pm_run_registered_probe() {
             ;;
         globus)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \
-                globus task show "$prp_task" -F json --jq '{status: .status, nice_status: .nice_status, faults: .faults, fatal_error: .fatal_error, effective_bytes_per_second: .effective_bytes_per_second}'
+                "$prp_helper" task show "$prp_task" -F json --jq '{status: .status, nice_status: .nice_status, faults: .faults, fatal_error: .fatal_error, effective_bytes_per_second: .effective_bytes_per_second}'
             prp_rc=$?
             [ "$prp_rc" -eq 0 ] || return "$prp_rc"
             prp_globus_line="$(python3 -c "$PM_PY_GLOBUS_PROBE" < "$prp_out" 2>>"$prp_err")" || return 1
@@ -697,7 +751,7 @@ pm_run_registered_probe() {
             ;;
         agent)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \
-                paseo inspect "$prp_agent" --json
+                "$prp_helper" inspect "$prp_agent" --json
             prp_rc=$?
             [ "$prp_rc" -eq 0 ] || return "$prp_rc"
             prp_agent_line="$(python3 -c "$PM_PY_AGENT_PROBE" < "$prp_out" 2>>"$prp_err")" || return 1
@@ -732,7 +786,7 @@ pm_run_registered_probe() {
             ;;
         pr-merge)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \
-                gh pr view "$prp_pr" --repo "$prp_repo" --json state --jq .state
+                "$prp_helper" pr view "$prp_pr" --repo "$prp_repo" --json state --jq .state
             ;;
         *)
             return 127
@@ -767,14 +821,15 @@ pm_deliver() {
     pmd_report="$2"
     pmd_backend="$(pm_spec_value deliver "$pmd_dir/spec")"
     [ -n "$pmd_backend" ] || return 0
-    if [ "$pmd_backend" = paseo-queue ]; then
+    pmd_mode="$(pm_spec_value deliver_mode "$pmd_dir/spec")"
+    if [ "$pmd_mode" = queue ] || [ "$pmd_backend" = paseo-queue ]; then
         pmd_agent="$(pm_spec_value report_to "$pmd_dir/spec")"
-        if [ -z "$pmd_agent" ] || ! command -v paseo-queue >/dev/null 2>&1; then
+        if [ -z "$pmd_agent" ]; then
             printf 'paseo-monitor: WARN delivery-failed watch=%s backend=%s\n' \
                 "$(basename "$pmd_dir")" "$pmd_backend" >&2
             return 1
         fi
-        printf '%s\n' "$pmd_report" | paseo-queue add "$pmd_agent"
+        printf '%s\n' "$pmd_report" | "$pmd_backend" add "$pmd_agent"
         pmd_rc=$?
     else
         printf '%s\n' "$pmd_report" | "$pmd_backend"
@@ -1192,6 +1247,8 @@ pm_watch_main() {
     pwm_repo=""
     pwm_pr=""
     pwm_deliver=""
+    pwm_helper=""
+    pwm_deliver_mode=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --kind) [ "$#" -ge 2 ] || { echo "paseo-monitor: --kind needs a value" >&2; return 2; }; pwm_kind="$2"; shift 2 ;;
@@ -1268,6 +1325,14 @@ pm_watch_main() {
         git-ref) [ -n "$pwm_remote" ] && [ -n "$pwm_ref" ] || { echo "paseo-monitor: git-ref needs --remote and --ref" >&2; return 2; } ;;
         pr-merge) [ -n "$pwm_repo" ] && [ -n "$pwm_pr" ] || { echo "paseo-monitor: pr-merge needs --repo and --pr" >&2; return 2; } ;;
     esac
+    pm_kind_helper "$pwm_kind" || return 2
+    pwm_helper="$PM_RESOLVED_BINARY"
+    if [ -n "$pwm_deliver" ]; then
+        pwm_deliver_name="$pwm_deliver"
+        [ "$pwm_deliver_name" = paseo-queue ] && pwm_deliver_mode=queue
+        pm_resolve_binary "$pwm_deliver_name" || return 2
+        pwm_deliver="$PM_RESOLVED_BINARY"
+    fi
     pwm_floor="$(pm_kind_floor "$pwm_kind" "$pwm_host")"
     [ -n "$pwm_interval" ] || pwm_interval="$(pm_kind_default_interval "$pwm_kind" "$pwm_report_transitions" "$pwm_host")"
     pm_valid_uint "$pwm_interval" || { echo "paseo-monitor: interval must be an integer" >&2; return 2; }
@@ -1313,6 +1378,8 @@ max_runs=$pwm_max_runs
 expires_in=$pwm_expires_in
 max_fires=$pwm_max_fires
 deliver=$pwm_deliver
+deliver_mode=$pwm_deliver_mode
+helper=$pwm_helper
 reason=$pwm_reason
 script=$pwm_script
 host=$pwm_host

@@ -65,9 +65,11 @@ pm_install_agent() {
         echo "install.sh: refusing to replace unmanaged plist: $PM_PLIST" >&2
         exit 1
     fi
+    pm_path="$(printf '%s' "${PATH:-}" | sed 's/[\\&|]/\\&/g')"
     pm_content="$(sed -e "s|__PASEO_MONITOR_BIN__|$REPO_DIR/bin/paseo-monitor|g" \
         -e "s|__PASEO_MONITOR_REPO__|$REPO_DIR|g" \
-        -e "s|__PASEO_MONITOR_HOME__|$PM_HOME|g" "$PM_TEMPLATE")"
+        -e "s|__PASEO_MONITOR_HOME__|$PM_HOME|g" \
+        -e "s|__PASEO_MONITOR_PATH__|$pm_path|g" "$PM_TEMPLATE")"
     pm_atomic_write "$PM_PLIST" "$pm_content"
     chmod 600 "$PM_PLIST"
     if pm_launchd_print; then

@@ -37,6 +37,8 @@ assert_grep "$plist" 'paseo-monitor: managed launchd agent' "managed marker"
 assert_grep "$plist" '<key>StartInterval</key>' "start interval key"
 assert_grep "$plist" '<integer>60</integer>' "start interval value"
 assert_grep "$plist" '<key>RunAtLoad</key>' "run at load key"
+assert_grep "$plist" '<key>PATH</key>' "launchd PATH key"
+assert_grep "$plist" "<string>$PATH</string>" "launchd PATH value"
 [ -f "$MOCK_DIR/launchd.loaded" ] || fail "launchd agent not bootstrapped"
 for skill_root in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"; do
     [ -f "$skill_root/paseo-monitor/SKILL.md" ] || fail "skill missing from $skill_root"
