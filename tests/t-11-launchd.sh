@@ -47,7 +47,7 @@ cat > "$SANDBOX/probe" <<EOF
 printf 'RUNNING detail\n'
 EOF
 chmod +x "$SANDBOX/probe"
-registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'trigger check' --terminal DONE --deadline +300)" || fail "registration self-heal failed"
+registration="$("$HOME/.local/bin/paseo-monitor" watch --script "$SANDBOX/probe" --reason 'trigger check' --terminal DONE --deadline +300)" || fail "registration self-heal failed"
 watch_id=$(printf '%s\n' "$registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 [ -f "$MOCK_DIR/launchd.loaded" ] || fail "registration did not self-heal launchd"
 $PMT_BIN _sweep || fail "beacon sweep failed"

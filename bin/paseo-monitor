@@ -356,10 +356,16 @@ pm_trigger_state() {
 }
 
 pm_self_heal_trigger() {
-    [ -f "$(pm_trigger_plist)" ] || return 0
+    pti_plist="$(pm_trigger_plist)"
+    [ -f "$pti_plist" ] || return 0
     pm_trigger_is_fresh && return 0
-    [ -f "$PM_INSTALLER" ] || return 1
-    sh "$PM_INSTALLER" install >/dev/null 2>&1
+    pti_installer="$PM_INSTALLER"
+    if [ ! -f "$pti_installer" ]; then
+        pti_repo="$(sed -n '/<key>WorkingDirectory<\/key>/{n;s/^[[:space:]]*<string>\(.*\)<\/string>$/\1/p;}' "$pti_plist")"
+        pti_installer="$pti_repo/install.sh"
+    fi
+    [ -f "$pti_installer" ] || return 1
+    sh "$pti_installer" install >/dev/null 2>&1
 }
 pm_spec_value() {
     psv_key="$1"
@@ -583,7 +589,7 @@ pm_deliver() {
 
 pm_report_value() {
     # pm_report_value <value> <bytes> -- cap untrusted envelope fields.
-    printf '%s' "$1" | cut -c1-"$2"
+    printf '%s' "$1" | tr '\n' ' ' | cut -c1-"$2"
 }
 
 pm_watch_target() {
