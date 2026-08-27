@@ -95,6 +95,7 @@ pm_atomic_write "$config_dir/spec" "$(sed 's/^deadline=.*/deadline=1/' "$config_
 $PMT_BIN _sweep || fail "parked config deadline sweep failed"
 assert_eq "$(cat "$config_dir/state")" expired "parked config deadline expiry"
 assert_grep "$config_dir/log" 'REPORT .*class=deadline' "parked config deadline report"
+assert_grep "$config_dir/log" 'could not determine state; last observation RUNNING; last probe failure class=config count=3 rc=127' "deadline failure diagnosis"
 printf 'RUNNING\n' > "$SANDBOX/mode"
 pm_atomic_write "$config_dir/spec" "$(sed 's/^deadline=.*/deadline=9999999999/' "$config_dir/spec")"
 pm_atomic_write "$config_dir/state" parked

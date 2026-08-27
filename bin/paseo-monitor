@@ -1171,6 +1171,14 @@ pm_health_failure_class() {
     printf 'network'
 }
 
+pm_last_probe_failure() {
+    # pm_last_probe_failure <watch-dir> -- return the latest failure diagnosis.
+    plpf_dir="$1"
+    plpf_detail="$(sed -n 's/.* PROBE-FAIL class=\([^ ]*\) count=\([^ ]*\) rc=\([^ ]*\).*/class=\1 count=\2 rc=\3/p' "$plpf_dir/log" 2>/dev/null | tail -n 1)"
+    [ -n "$plpf_detail" ] || plpf_detail="$(sed -n 's/.* PROBE-FAIL class=\([^ ]*\) count=\([^ ]*\) rc=\([^ ]*\).*/class=\1 count=\2 rc=\3/p' "$plpf_dir/log.1" 2>/dev/null | tail -n 1)"
+    printf '%s\n' "$plpf_detail"
+}
+
 pm_backoff_delay() {
     pbd_interval="$1"
     pbd_count="$2"
@@ -1227,7 +1235,13 @@ pm_sweep_watch() {
     psw_deadline="$(pm_spec_value deadline "$psw_dir/spec")"
     psw_old="$(cat "$psw_dir/last" 2>/dev/null || printf '')"
     if pm_valid_uint "$psw_deadline" && [ "$psw_now" -ge "$psw_deadline" ]; then
-        pm_report_event "$psw_dir" deadline "$psw_old" DEADLINE "could not determine state; last observation $psw_old" || :
+        psw_probe_failure="$(pm_last_probe_failure "$psw_dir")"
+        if [ -n "$psw_probe_failure" ]; then
+            psw_deadline_detail="could not determine state; last observation $psw_old; last probe failure $psw_probe_failure"
+        else
+            psw_deadline_detail="could not determine state; last observation $psw_old"
+        fi
+        pm_report_event "$psw_dir" deadline "$psw_old" DEADLINE "$psw_deadline_detail" || :
         if [ ! -f "$psw_dir/undelivered" ]; then
             set_state "$psw_dir" expired || :
         fi
