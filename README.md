@@ -2,7 +2,7 @@
 
 `paseo-monitor` is a cheap, stateless watcher for long-running external work.
 A launchd-fired sweeper observes a due watch and reports only state changes;
-it does not own a liveness guarantee. The complete design is in `PLAN.md`.
+the caller owns the liveness backstop. The complete design is in `PLAN.md`.
 
 This repository targets macOS and POSIX `sh` (`/bin/sh` is bash 3.2.57 in
 `sh` mode). The deliberate trigger choice is launchd: its GUI agent preserves
@@ -38,10 +38,11 @@ promise. The caller owns its liveness backstop.
 ## State and knobs
 
 Default state is `~/.paseo-monitor`. The state root contains `sweep.lock/`,
-`sweep.log`, and `watches/<watch-id>/` directories. A watch directory contains
-`spec`, `context`, `probe`, `last`, `detail`, `nextDue`, `health`, `state`,
-`undelivered`, `fires`, and `log` as applicable. The global lock is mkdir-based
-and all mutable files use atomic temporary-file plus `mv` writes.
+`sweep.log`, `sweep.beacon`, and `watches/<watch-id>/` directories. A watch
+directory contains `spec`, `context`, `probe`, `last`, `detail`, `nextDue`,
+`health`, `state`, `undelivered`, `fires`, and `log` as applicable. The global
+lock is mkdir-based and all mutable files use atomic temporary-file plus `mv`
+writes.
 
 External knobs are read once at process startup into internal `PM_*` variables;
 runtime code must use only the internal names:
@@ -68,9 +69,13 @@ paseo-monitor --help
 ```
 
 Installation creates the idempotent symlink
-`~/.local/bin/paseo-monitor -> bin/paseo-monitor`. Skill installation is
-performed when `skills/paseo-monitor/SKILL.md` is present; that discovery file
-belongs to a later lane.
+`~/.local/bin/paseo-monitor -> bin/paseo-monitor` and bootstraps the managed
+launchd user agent `com.paseo-monitor.sweep` with `StartInterval=60` and
+`RunAtLoad=true`. The agent is deliberate: a GUI launchd process carries
+`SSH_AUTH_SOCK` and login-Keychain access required by cluster probes, unlike a
+bare cron process. Re-running the installer safely reloads the marked plist;
+`./install.sh uninstall` removes the agent and CLI symlink without deleting
+watch state.
 
 ## Development
 
