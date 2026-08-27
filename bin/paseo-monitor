@@ -587,10 +587,11 @@ pm_sweep_watch() {
     pm_run_registered_probe "$psw_dir" "$psw_out" "$psw_err"
     psw_rc=$?
     if [ -s "$psw_err" ]; then
+        psw_err_text="$(cat "$psw_err")"
         psw_err_line="$(sed -n '1p' "$psw_err")"
-        log_line "$psw_dir" PROBE-STDERR "$psw_err_line" || :
+        log_line "$psw_dir" PROBE-STDERR "$psw_err_text" || :
     else
-        psw_err_line=""
+        psw_err_text=""
     fi
     if [ "$psw_rc" -ne 0 ]; then
         case "$psw_err_line" in
