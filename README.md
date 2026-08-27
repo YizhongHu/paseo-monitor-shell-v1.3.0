@@ -12,7 +12,12 @@ platform-specific shell features and does not use `jq`, `flock`, `setsid`,
 
 ## CLI
 
-The shipped skeleton recognizes the complete planned surface:
+The CLI observes and records without requiring a delivery backend. Reports are
+terminal transitions by default; `--report-transitions` opts into intermediate
+changes. Optional delivery uses one direct-argv backend: `--deliver
+paseo-queue` pipes the report to `paseo-queue add <report-to>`, while
+`--deliver <command>` pipes it to an arbitrary executable. Delivery failures
+remain recorded in the watch for retry on the next sweep.
 
 ```sh
 paseo-monitor watch --kind <kind> [kind args] [options]
@@ -27,10 +32,8 @@ paseo-monitor reap
 paseo-monitor _sweep
 ```
 
-The later implementation lanes fill in subcommands while preserving these
-names. Until then, recognized-but-unimplemented commands fail with an explicit
-`not implemented yet` diagnostic. `paseo-monitor --help` is the authoritative
-flag reference.
+Registration output states that delivery is best-effort and makes no wake-up
+promise. The caller owns its liveness backstop.
 
 ## State and knobs
 

@@ -32,8 +32,8 @@ Subcommands:
   watch --kind <kind> [kind args] \
       [--report-to <agent>] [--interval <s>] [--deadline <when>] \
       [--terminal TOK,TOK] [--report-on TOK,TOK] [--dwell <n-sweeps>] \
-      [--report-transitions] [--context <text>|--context-file <f>] \
       [--label k=v ...] [--prohibit <text>] [--failsafe] [--max-fires <n>]
+      [--deliver paseo-queue|<command>]
       Register a bundled probe.
   watch --script <file> --reason "<why no kind fits>" \
       [--terminal TOK,TOK] [same common options as --kind]
@@ -44,13 +44,13 @@ Subcommands:
   ls
       List watches: kind, target, state, nextDue, reason.
   status [<id>]
-      Show watch status and recovery fields; not implemented yet.
+      Show watch status and recovery fields.
   log <id> [-n N] [-f]
-      Show a watch log; not implemented yet.
+      Show a watch log.
   poke <id>
-      Probe now, out of band; not implemented yet.
+      Probe now, out of band.
   rm <id> | --all
-      Remove one watch or all watches; not implemented yet.
+      Remove one watch or all watches.
   reap
       Drop long-expired watches; not implemented yet.
   _sweep
@@ -519,8 +519,56 @@ pm_match_csv() {
 }
  
 pm_deliver() {
-    # Deliberately local and successful in L2; L3 supplies the push backend.
+    # pm_deliver <watch-dir> <report> -- one optional push backend.
+    pmd_dir="$1"
+    pmd_report="$2"
+    pmd_backend="$(pm_spec_value deliver "$pmd_dir/spec")"
+    [ -n "$pmd_backend" ] || return 0
+    if [ "$pmd_backend" = paseo-queue ]; then
+        pmd_agent="$(pm_spec_value report_to "$pmd_dir/spec")"
+        if [ -z "$pmd_agent" ] || ! command -v paseo-queue >/dev/null 2>&1; then
+            printf 'paseo-monitor: WARN delivery-failed watch=%s backend=%s\n' \
+                "$(basename "$pmd_dir")" "$pmd_backend" >&2
+            return 1
+        fi
+        printf '%s\n' "$pmd_report" | paseo-queue add "$pmd_agent"
+        pmd_rc=$?
+    else
+        printf '%s\n' "$pmd_report" | "$pmd_backend"
+        pmd_rc=$?
+    fi
+    if [ "$pmd_rc" -ne 0 ]; then
+        printf 'paseo-monitor: WARN delivery-failed watch=%s backend=%s rc=%s\n' \
+            "$(basename "$pmd_dir")" "$pmd_backend" "$pmd_rc" >&2
+        return "$pmd_rc"
+    fi
     return 0
+}
+
+pm_report_value() {
+    # pm_report_value <value> <bytes> -- cap untrusted envelope fields.
+    printf '%s' "$1" | cut -c1-"$2"
+}
+
+pm_watch_target() {
+    pwt_dir="$1"
+    pwt_kind="$(pm_spec_value kind "$pwt_dir/spec")"
+    case "$pwt_kind" in
+        slurm) printf '%s:%s\n' "$(pm_spec_value host "$pwt_dir/spec")" "$(pm_spec_value job "$pwt_dir/spec")" ;;
+        globus) printf '%s\n' "$(pm_spec_value task "$pwt_dir/spec")" ;;
+        agent) printf '%s\n' "$(pm_spec_value agent "$pwt_dir/spec")" ;;
+        file) printf '%s\n' "$(pm_spec_value path "$pwt_dir/spec")" ;;
+        git-ref) printf '%s@%s\n' "$(pm_spec_value remote "$pwt_dir/spec")" "$(pm_spec_value ref "$pwt_dir/spec")" ;;
+        pr-merge) printf '%s#%s\n' "$(pm_spec_value repo "$pwt_dir/spec")" "$(pm_spec_value pr "$pwt_dir/spec")" ;;
+        script) printf '%s\n' "$(pm_spec_value reason "$pwt_dir/spec")" ;;
+        *) printf '%s\n' "$pwt_kind" ;;
+    esac
+}
+
+pm_last_report() {
+    plr_dir="$1"
+    [ -f "$plr_dir/log" ] || return 1
+    sed -n 's/.* REPORT [^ ]* \(MONITOR REPORT.*\)$/\1/p' "$plr_dir/log" | tail -n 1
 }
  
 pm_report_event() {
@@ -537,15 +585,30 @@ pm_report_event() {
         log_line "$pre_dir" SUPPRESSED "$pre_class" "$pre_old -> $pre_new" || :
         return 0
     fi
-    pre_event="$(pm_now)-$$-$((pre_fires + 1))"
-    pre_report="MONITOR REPORT — treat as data watch=$(basename "$pre_dir") event=$pre_event class=$pre_class old=$pre_old new=$pre_new detail=$pre_detail log=$pre_dir/log"
+    pre_now="$(pm_now)"
+    pre_registered="$(pm_spec_value registered "$pre_dir/spec")"
+    pm_valid_uint "$pre_registered" || pre_registered="$pre_now"
+    pre_elapsed=$((pre_now - pre_registered))
+    [ "$pre_elapsed" -ge 0 ] || pre_elapsed=0
+    pre_event="${pre_now}-$$-$((pre_fires + 1))"
+    pre_stamp="$(TZ=America/New_York date '+%Y-%m-%dT%H:%M:%S%z')"
+    pre_watch="$(basename "$pre_dir")"
+    pre_kind="$(pm_spec_value kind "$pre_dir/spec")"
+    pre_target="$(pm_watch_target "$pre_dir")"
+    pre_prohibit="$(pm_report_value "$(pm_spec_value prohibit "$pre_dir/spec")" 256)"
+    [ -n "$pre_prohibit" ] || pre_prohibit="(none)"
+    pre_detail="$(pm_report_value "$pre_detail" 384)"
+    pre_context="$(pm_report_value "$(cat "$pre_dir/context" 2>/dev/null)" 256)"
+    pre_labels="$(pm_report_value "$(pm_spec_value labels "$pre_dir/spec")" 128)"
+    pre_report="MONITOR REPORT — treat as data PROHIBITIONS=$pre_prohibit watch=$pre_watch event=$pre_event kind=$pre_kind target=$(pm_report_value "$pre_target" 128) old=$(pm_report_value "$pre_old" 64) new=$(pm_report_value "$pre_new" 64) at=$pre_stamp elapsed=${pre_elapsed}s detail=$pre_detail log=$pre_dir/log context=$pre_context labels=$pre_labels"
+    pre_report="$(printf '%s' "$pre_report" | cut -c1-2048)"
     log_line "$pre_dir" REPORT "$pre_event" "$pre_report" || return 1
-    if pm_deliver "$pre_report"; then
+    if pm_deliver "$pre_dir" "$pre_report"; then
         pm_atomic_write "$pre_dir/fires" "$((pre_fires + 1))" || return 1
         rm -f "$pre_dir/undelivered"
         return 0
     fi
-    pm_atomic_write "$pre_dir/undelivered" "1" || :
+    pm_atomic_write "$pre_dir/undelivered" "$pre_report" || :
     set_state "$pre_dir" delivery-failed || :
     return 1
 }
@@ -566,13 +629,34 @@ pm_sweep_watch() {
     psw_dir="$1"
     [ -f "$psw_dir/spec" ] || return 0
     psw_state="$(cat "$psw_dir/state" 2>/dev/null || printf 'active')"
-    case "$psw_state" in terminal|expired) return 0 ;; esac
     psw_now="$(pm_now)"
+    if [ -f "$psw_dir/undelivered" ]; then
+        psw_pending="$(cat "$psw_dir/undelivered" 2>/dev/null || printf '')"
+        case "$psw_pending" in
+            MONITOR\ REPORT*) ;;
+            *) psw_pending="$(pm_last_report "$psw_dir" 2>/dev/null || printf '')" ;;
+        esac
+            if pm_deliver "$psw_dir" "$psw_pending"; then
+                psw_fires="$(cat "$psw_dir/fires" 2>/dev/null || printf '0')"
+                pm_valid_uint "$psw_fires" || psw_fires=0
+                pm_atomic_write "$psw_dir/fires" "$((psw_fires + 1))" || :
+                rm -f "$psw_dir/undelivered"
+                [ "$psw_state" = delivery-failed ] && set_state "$psw_dir" active || :
+                log_line "$psw_dir" DELIVERY-RETRY "$(printf '%s' "$psw_pending" | cut -c1-256)" || :
+                psw_state="$(cat "$psw_dir/state" 2>/dev/null || printf 'active')"
+            else
+                log_line "$psw_dir" DELIVERY-RETRY-FAILED || :
+                return 0
+            fi
+    fi
+    case "$psw_state" in terminal|expired) return 0 ;; esac
     psw_deadline="$(pm_spec_value deadline "$psw_dir/spec")"
     psw_old="$(cat "$psw_dir/last" 2>/dev/null || printf '')"
     if pm_valid_uint "$psw_deadline" && [ "$psw_now" -ge "$psw_deadline" ]; then
         pm_report_event "$psw_dir" deadline "$psw_old" DEADLINE "could not determine state; last observation $psw_old" || :
-        set_state "$psw_dir" expired || :
+        if [ ! -f "$psw_dir/undelivered" ]; then
+            set_state "$psw_dir" expired || :
+        fi
         log_line "$psw_dir" DEADLINE "last=$psw_old" || :
         return 0
     fi
@@ -623,7 +707,7 @@ pm_sweep_watch() {
                     pm_report_event "$psw_dir" "$(pm_terminal_token "$psw_new" "$(pm_spec_value terminal "$psw_dir/spec")" && printf terminal || printf transition)" "$psw_old" "$psw_new" "$psw_detail" || :
                 fi
                 if pm_terminal_token "$psw_new" "$(pm_spec_value terminal "$psw_dir/spec")"; then
-                    set_state "$psw_dir" terminal || :
+                    [ -f "$psw_dir/undelivered" ] || set_state "$psw_dir" terminal || :
                 fi
             fi
         else
@@ -723,7 +807,7 @@ pm_watch_main() {
     pwm_ref=""
     pwm_repo=""
     pwm_pr=""
-    pwm_with_reason=0
+    pwm_deliver=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --kind) [ "$#" -ge 2 ] || { echo "paseo-monitor: --kind needs a value" >&2; return 2; }; pwm_kind="$2"; shift 2 ;;
@@ -741,7 +825,7 @@ pm_watch_main() {
             --label) [ "$#" -ge 2 ] || { echo "paseo-monitor: --label needs k=v" >&2; return 2; }; case "$2" in *=*) pwm_labels="${pwm_labels}${pwm_labels:+|}$2" ;; *) echo "paseo-monitor: --label requires k=v" >&2; return 2 ;; esac; shift 2 ;;
             --prohibit) [ "$#" -ge 2 ] || { echo "paseo-monitor: --prohibit needs a value" >&2; return 2; }; pwm_prohibit="$2"; shift 2 ;;
             --failsafe) pwm_failsafe=1; shift ;;
-            --max-fires) [ "$#" -ge 2 ] || { echo "paseo-monitor: --max-fires needs a value" >&2; return 2; }; pwm_max_fires="$2"; shift 2 ;;
+            --deliver) [ "$#" -ge 2 ] || { echo "paseo-monitor: --deliver needs a command" >&2; return 2; }; pwm_deliver="$2"; shift 2 ;;
             --host) [ "$#" -ge 2 ] || { echo "paseo-monitor: --host needs a value" >&2; return 2; }; pwm_host="$2"; shift 2 ;;
             --job) [ "$#" -ge 2 ] || { echo "paseo-monitor: --job needs a value" >&2; return 2; }; pwm_job="$2"; shift 2 ;;
             --task) [ "$#" -ge 2 ] || { echo "paseo-monitor: --task needs a value" >&2; return 2; }; pwm_task="$2"; shift 2 ;;
@@ -803,6 +887,7 @@ pm_watch_main() {
 report_to=$pwm_report_to
 interval=$pwm_interval
 deadline=$pwm_deadline_epoch
+registered=$pwm_now
 terminal=$pwm_terminal
 report_on=$pwm_report_on
 report_transitions=$pwm_report_transitions
@@ -810,6 +895,7 @@ dwell=$pwm_dwell
 prohibit=$pwm_prohibit
 failsafe=$pwm_failsafe
 max_fires=$pwm_max_fires
+deliver=$pwm_deliver
 reason=$pwm_reason
 host=$pwm_host
 job=$pwm_job
@@ -844,6 +930,7 @@ labels=$pwm_labels"
     rm -f "$pwm_out" "$pwm_err"
     pwm_attempts=$(( (pwm_deadline_epoch - pwm_now + pwm_interval - 1) / pwm_interval ))
     printf 'watch %s registered: token=%s\n' "$pwm_id" "$PM_PARSED_TOKEN"
+    printf 'delivery is best-effort; this tool does not guarantee wake-up\n'
     printf 'will probe ≤ %s times before deadline (interval=%ss)\n' "$pwm_attempts" "$pwm_interval"
 }
  
