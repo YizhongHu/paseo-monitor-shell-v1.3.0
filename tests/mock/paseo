@@ -1,0 +1,14 @@
+#!/bin/sh
+# Minimal scripted paseo mock. JSON fixtures are supplied by tests.
+printf 'paseo %s\n' "$*" >> "$MOCK_DIR/calls.log"
+case "${1:-}" in
+    ls)
+        [ "${2:-}" = "--json" ] || exit 2
+        [ -s "$MOCK_DIR/agents.json" ] && cat "$MOCK_DIR/agents.json" || printf '[]\n'
+        ;;
+    inspect)
+        [ "${3:-}" = "--json" ] || exit 2
+        if [ -f "$MOCK_DIR/inspect.json" ]; then cat "$MOCK_DIR/inspect.json"; else printf '{}\n'; fi
+        ;;
+    *) exit 2 ;;
+esac

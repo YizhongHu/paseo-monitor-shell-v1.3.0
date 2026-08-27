@@ -75,6 +75,228 @@ calling environment deliberately; credentials such as SSH_AUTH_SOCK matter.
 EOF
 }
 
+# --- Fixed-name shell primitives copied from paseo-queue -----------------
+pm_file_size() {
+    stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || wc -c < "$1" 2>/dev/null
+}
+
+pm_dir_mtime() {
+    stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
+}
+
+pm_log_path() {
+    if [ "$1" = "$PM_HOME" ]; then
+        printf '%s\n' "$PM_HOME/sweep.log"
+    else
+        printf '%s\n' "$1/log"
+    fi
+}
+
+rotate_log_if_big() {
+    # rotate_log_if_big <dir> -- one-generation rotation for sweep/watch logs.
+    rlb_dir="$1"
+    rlb_log="$(pm_log_path "$rlb_dir")"
+    [ -f "$rlb_log" ] || return 0
+    rlb_size="$(pm_file_size "$rlb_log")"
+    if [ -n "$rlb_size" ] && [ "$rlb_size" -ge "$PM_LOG_MAX_BYTES" ]; then
+        mv -f "$rlb_log" "$rlb_log.1" 2>/dev/null
+    fi
+    return 0
+}
+
+log_line() {
+    # log_line <dir> <event> [detail...] -- append an operational event.
+    ll_dir="$1"
+    ll_event="$2"
+    shift 2
+    mkdir -p "$ll_dir" || return 1
+    ll_log="$(pm_log_path "$ll_dir")"
+    ll_ts="$(TZ=America/New_York date '+%Y-%m-%dT%H:%M:%S%z')"
+    printf '%s [%s] %s %s\n' "$ll_ts" "$$" "$ll_event" "$*" >> "$ll_log" || return 1
+    rotate_log_if_big "$ll_dir"
+}
+
+pm_atomic_write() {
+    # pm_atomic_write <path> <content> -- install content with tmp+mv.
+    paw_path="$1"
+    paw_content="$2"
+    paw_dir="$(dirname "$paw_path")"
+    mkdir -p "$paw_dir" || return 1
+    paw_tmp="$paw_dir/.tmp.$$.${paw_path##*/}"
+    printf '%s\n' "$paw_content" > "$paw_tmp" || return 1
+    mv -f "$paw_tmp" "$paw_path" || return 1
+}
+
+set_state() {
+    # set_state <dir> <state> -- atomically install the state file.
+    ss_dir="$1"
+    ss_state="$2"
+    pm_atomic_write "$ss_dir/state" "$ss_state" || {
+        printf 'paseo-monitor: set_state failed for %s\n' "$ss_dir" >&2
+        return 1
+    }
+}
+
+ensure_dirs() {
+    # ensure_dirs <dir> -- create the durable monitor directories.
+    ed_dir="$1"
+    mkdir -p "$ed_dir/watches" "$ed_dir/tmp" || return 1
+    return 0
+}
+
+pm_is_full_uuid() {
+    case "$1" in
+        ????????-????-????-????-????????????) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+PM_PY_MATCH_AGENT="$(cat <<'PY'
+import json, sys
+query = sys.argv[1]
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    data = []
+if isinstance(data, dict):
+    data = data.get("agents", [])
+if not isinstance(data, list):
+    data = []
+matched = {}
+for agent in data:
+    aid = agent.get("id", "")
+    name = agent.get("name", "")
+    if query and aid.startswith(query):
+        matched[aid] = agent
+    elif name == query:
+        matched[aid] = agent
+if len(matched) == 1:
+    agent = next(iter(matched.values()))
+    print("MATCH\t%s\t%s" % (agent.get("id", ""), agent.get("name", "")))
+elif len(matched) == 0:
+    print("NONE")
+else:
+    print("AMBIGUOUS\t" + "\t".join("%s (%s)" % (a.get("id", ""), a.get("name", "")) for a in matched.values()))
+PY
+)"
+
+PM_PY_INSPECT_AGENT="$(cat <<'PY'
+import json, sys
+try:
+    agent = json.load(sys.stdin)
+except Exception:
+    print("unknown 0 0")
+    sys.exit(1)
+if isinstance(agent, list):
+    agent = agent[0] if agent else {}
+status = agent.get("Status", agent.get("status", "unknown"))
+archived = agent.get("Archived", agent.get("archived", False))
+permissions = agent.get("PendingPermissions", agent.get("pendingPermissions", []))
+if not isinstance(permissions, list):
+    permissions = []
+print("%s %s %d" % (str(status).lower(), 1 if archived else 0, len(permissions)))
+PY
+)"
+
+pm_match_agent() {
+    python3 -c "$PM_PY_MATCH_AGENT" "$1"
+}
+
+resolve_agent() {
+    # resolve_agent <query> <allow_orphan:0|1> -- print UUID<TAB>name.
+    ra_query="$1"
+    ra_allow_orphan="${2:-0}"
+    ra_json="$(paseo ls --json 2>/dev/null)" || {
+        printf 'paseo-monitor: paseo ls --json failed (daemon unreachable?)\n' >&2
+        return 3
+    }
+    ra_result="$(printf '%s' "$ra_json" | pm_match_agent "$ra_query")"
+    ra_tag="$(printf '%s\n' "$ra_result" | cut -f1)"
+    case "$ra_tag" in
+        MATCH)
+            printf '%s\t%s\n' "$(printf '%s\n' "$ra_result" | cut -f2)" "$(printf '%s\n' "$ra_result" | cut -f3-)"
+            return 0
+            ;;
+        AMBIGUOUS)
+            {
+                printf 'paseo-monitor: ambiguous agent "%s", candidates:\n' "$ra_query"
+                printf '%s\n' "$ra_result" | cut -f2- | tr '\t' '\n' | sed 's/^/  /'
+            } >&2
+            return 2
+            ;;
+        *)
+            if [ "$ra_allow_orphan" = "1" ] && pm_is_full_uuid "$ra_query" && [ -d "$PM_HOME/watches/$ra_query" ]; then
+                printf '%s\t\n' "$ra_query"
+                return 0
+            fi
+            printf 'paseo-monitor: no agent matches "%s"\n' "$ra_query" >&2
+            return 2
+            ;;
+    esac
+}
+
+inspect_agent() {
+    # inspect_agent <uuid> -- print status archived pending-permission-count.
+    ia_json="$(paseo inspect "$1" --json 2>/dev/null)" || return 1
+    [ -n "$ia_json" ] || return 1
+    printf '%s' "$ia_json" | python3 -c "$PM_PY_INSPECT_AGENT"
+}
+
+lock_holder_alive() {
+    # lock_holder_alive <dir> -- liveness by pid plus process identity.
+    lha_lockdir="$1/sweep.lock"
+    [ -d "$lha_lockdir" ] || return 1
+    if [ -f "$lha_lockdir/pid" ]; then
+        lha_pid="$(cat "$lha_lockdir/pid" 2>/dev/null)"
+        case "$lha_pid" in ''|*[!0-9]*) return 1 ;; esac
+        if kill -0 "$lha_pid" 2>/dev/null &&
+            ps -p "$lha_pid" -o command= 2>/dev/null | grep -q 'paseo-monitor'; then
+            return 0
+        fi
+        return 1
+    fi
+    lha_now="$(date +%s)"
+    lha_mtime="$(pm_dir_mtime "$lha_lockdir")"
+    if [ -n "$lha_mtime" ] && [ $((lha_now - lha_mtime)) -lt "$PM_LOCK_GRACE_SECONDS" ]; then
+        return 0
+    fi
+    return 1
+}
+
+break_stale_lock() {
+    bsl_dir="$1"
+    bsl_stale="$bsl_dir/sweep.lock.stale.$$"
+    if mv "$bsl_dir/sweep.lock" "$bsl_stale" 2>/dev/null; then
+        rm -rf "$bsl_stale" 2>/dev/null
+    fi
+    return 0
+}
+
+acquire_lock() {
+    # acquire_lock <dir> -- mkdir-based exclusive global sweep lock.
+    al_dir="$1"
+    mkdir -p "$al_dir" || return 1
+    if mkdir "$al_dir/sweep.lock" 2>/dev/null; then
+        printf '%s\n' "$$" > "$al_dir/sweep.lock/pid"
+        return 0
+    fi
+    lock_holder_alive "$al_dir" && return 1
+    break_stale_lock "$al_dir"
+    if mkdir "$al_dir/sweep.lock" 2>/dev/null; then
+        printf '%s\n' "$$" > "$al_dir/sweep.lock/pid"
+        return 0
+    fi
+    return 1
+}
+
+release_lock() {
+    rl_dir="$1"
+    [ -d "$rl_dir/sweep.lock" ] || return 0
+    [ -f "$rl_dir/sweep.lock/pid" ] || return 1
+    [ "$(cat "$rl_dir/sweep.lock/pid" 2>/dev/null)" = "$$" ] || return 1
+    rm -rf "$rl_dir/sweep.lock" 2>/dev/null
+}
+
 pm_init_state() {
     mkdir -p "$PM_HOME/watches" || {
         printf 'paseo-monitor: cannot create state root: %s\n' "$PM_HOME" >&2
@@ -87,16 +309,19 @@ not_implemented() {
     return 1
 }
 
-case "${1:-help}" in
-    help|--help|-h)
-        usage
-        ;;
-    watch|kinds|ls|status|log|poke|rm|reap|_sweep)
-        not_implemented "$1"
-        ;;
-    *)
-        printf 'paseo-monitor: unknown subcommand: %s\n' "$1" >&2
-        printf 'Try paseo-monitor --help.\n' >&2
-        exit 2
-        ;;
-esac
+if [ "${PM_SOURCE_ONLY:-0}" -ne 1 ]; then
+    case "${1:-help}" in
+        help|--help|-h)
+            usage
+            ;;
+        watch|kinds|ls|status|log|poke|rm|reap|_sweep)
+            not_implemented "$1"
+            ;;
+        *)
+            printf 'paseo-monitor: unknown subcommand: %s\n' "$1" >&2
+            printf 'Try paseo-monitor --help.\n' >&2
+            exit 2
+            ;;
+    esac
+fi
+
