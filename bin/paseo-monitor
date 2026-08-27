@@ -392,17 +392,22 @@ pm_run_with_timeout() {
         fi
     ) &
     pmt_killer=$!
-    wait "$pmt_child"
+    wait "$pmt_child" 2>/dev/null
     pmt_rc=$?
+    if [ -f "$pmt_timeout_marker" ]; then
+        kill "$pmt_out_cap" "$pmt_err_cap" 2>/dev/null
+        wait "$pmt_out_cap" 2>/dev/null
+        wait "$pmt_err_cap" 2>/dev/null
+        kill "$pmt_killer" 2>/dev/null
+        wait "$pmt_killer" 2>/dev/null
+        rm -f "$pmt_out_pipe" "$pmt_err_pipe" "$pmt_timeout_marker"
+        return 124
+    fi
     kill "$pmt_killer" 2>/dev/null
     wait "$pmt_killer" 2>/dev/null
     wait "$pmt_out_cap" 2>/dev/null
     wait "$pmt_err_cap" 2>/dev/null
     rm -f "$pmt_out_pipe" "$pmt_err_pipe"
-    if [ -f "$pmt_timeout_marker" ]; then
-        rm -f "$pmt_timeout_marker"
-        return 124
-    fi
     return "$pmt_rc"
 }
  
