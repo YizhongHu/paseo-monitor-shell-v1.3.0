@@ -24,6 +24,32 @@ paseo-monitor watch --kind slurm --host cannon --job 24211558 --deadline +3600
 when `--deliver paseo-queue` is selected; without a delivery backend,
 registration records the watch and its reports locally.
 
+`paseo-monitor version` or `paseo-monitor --version` prints the release version.
+
+## Ownership and removal
+
+`ls` and `status` show `owner=`, `report_to=`, and `ours=yes|no`. `rm <id>`
+removes only the caller's watch; `rm --all` is scoped to the caller. Use
+`rm --all-agents` for cross-owner removal: it lists every live watch with
+owner, `report_to`, and target before removing them. There is no interactive
+prompt: the caller is an unattended agent, and a prompt would hang it rather
+than protect it. Each removal prints the deleted watch with owner,
+`report_to`, and target.
+
+Removed watches move to a graveyard retained under the same 30-day `reap` TTL.
+`status <id>` and `log <id>` continue to resolve the removed watch. A queued
+report can outlive its watch, so the envelope's `log=` citation pointer must
+keep resolving after removal.
+
+Removal is not reversible by re-registering the target: a third party can
+create a new watch, but cannot recover the removed watch's `report_to`,
+`deliver`, `context`, `prohibit`, `labels`, or `deadline` into that new
+registration.
+
+For a failsafe schedule, `watch` accepts `--provider <provider>` and
+`--provider <provider>/<model>`. If omitted, it uses the calling agent's
+provider, then the first available and enabled provider.
+
 ## Reports
 
 After the synchronous registration probe succeeds, reports arrive as follows:
@@ -136,10 +162,17 @@ pointer. Without the prohibition, a fresh context may helpfully retry.
 
 `--failsafe` creates a bounded one-shot Paseo schedule. Use `--max-runs` and
 `--expires-in` to bound it; the default is one run expiring at the watch
-deadline. The schedule prompt contains only the watch id, the
-`status`/`log` procedure, and the copied prohibition text—never routing or
-state. A clean terminal report removes the schedule. If the failsafe fires,
-run `paseo-monitor status <id>` before anything else.
+deadline. The schedule prompt contains only the watch id, the `status`/`log`
+procedure, and the copied prohibition text—never routing or state. A clean
+terminal report removes the schedule. If schedule creation fails, registration
+warns, still prints the watch id, exits 0, and prints a `paseo schedule create`
+fallback. The emitted fallback currently omits `--provider`; if the installed
+Paseo CLI requires one, add an available provider before running it. The
+optional Layer 4 backstop must never take down Layer 1 observation.
+A provider can be selected with `--provider <provider>` or
+`--provider <provider>/<model>`; without it, the caller's provider is used,
+then the first available and enabled provider. If the failsafe fires, run
+`paseo-monitor status <id>` before anything else.
 
 ## Required liveness ritual
 

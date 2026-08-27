@@ -1,7 +1,8 @@
 # paseo-monitor — design plan
 
-Status: **design complete, not implemented.** Every load-bearing question is
-closed; see "Open questions" for the minor residue.
+Status: **implemented through `c75c3d8`**; this plan records the shipped
+contract and remaining design residue. See "Open questions" for the minor
+residue.
 
 Evidence base:
 
@@ -760,18 +761,43 @@ CLIs; they read skills and copy patterns. So:
 1. The kind table lives **in SKILL.md** with exact copy-pasteable
    invocations, regenerated at install.
 2. `paseo-monitor kinds` exists as the freshness check against skill drift —
-   a trivial ~15-line print of the hardcoded table (name, description,
-   params, floor, default interval). `--help` + SKILL.md is 90%; `kinds` is
+   a trivial ~15-line print of the hardcoded table (name, description, params,
+   floor, default interval). `--help` + SKILL.md is 90%; `kinds` is
    the cheap remaining 10%.
 3. **Day-one coverage decides the habit.** If an agent's first three needs
    are covered, recipe-first becomes the learned pattern; if the first need
    falls through to `--script`, the opposite habit forms. Ship coverage
    before advertising the tool.
 
+Ownership is explicit at registration: `owner` records `$PASEO_AGENT_ID`,
+`report_to` records the report route, and `ls`/`status` add `ours=yes|no`
+relative to the current caller. `rm <id>` removes only a watch owned by the
+caller. `rm --all` removes only the caller's watches. `rm --all-agents` is the
+cross-owner operation: it lists every live watch with owner, `report_to`, and
+target, then removes them. There is no interactive prompt: the caller is an
+unattended agent, and a prompt would hang it rather than protect it. Every
+removal prints the watch id, owner, `report_to`, and target.
+
+The removed watch is moved to a graveyard, not discarded. It remains resolvable
+through `status <id>` and `log <id>` under the existing 30-day `reap` TTL. A
+queued report can outlive its watch, so the envelope's `log=` citation pointer
+must keep resolving after removal.
+
+Removal is not reversible by re-registering the target: a third party can
+create a new watch, but cannot recover the removed watch's `report_to`,
+`deliver`, `context`, `prohibit`, `labels`, or `deadline` into that new
+registration.
+
+The `watch` command accepts `--provider <provider>` and
+`--provider <provider>/<model>`. For `--failsafe`, an omitted provider uses the
+calling agent's provider, then the first available and enabled provider.
+
+The `version` and `--version` commands print the release version.
+
 The `description:` frontmatter is what lands in an agent's system prompt. It
 must carry the phrases an agent will actually be thinking: monitor a
-long-running job, wait for a Slurm job, watch a Globus transfer, notify when
-done, wake me when it finishes, avoid going stale, stop polling.
+long-running job, wait for a Slurm job, watch a Globus transfer, report when
+done, avoid going stale, stop polling.
 
 Cross-links: `monitor-with-subagent` ("prefer `paseo-monitor` when a dumb
 probe suffices"), the `paseo` skill (name it beside `paseo-queue` as the
@@ -792,22 +818,32 @@ paseo-monitor watch --kind <kind> [kind args] \
     [--report-to <agent>] [--interval <s>] --deadline <when> \
     [--terminal TOK,TOK] [--report-on TOK,TOK] [--report-transitions] \
     [--with-reason] [--dwell <n-sweeps>] [--context <text>|--context-file <f>] \
-    [--label k=v ...] [--prohibit <text>] [--failsafe] [--max-fires <n>] \
+    [--label k=v ...] [--provider <provider>[/<model>]] \
+    [--prohibit <text>] [--failsafe] [--max-fires <n>] \
     [--max-runs <n>] [--expires-in <duration>] [--no-start-report]
 
 paseo-monitor watch --script <file> --reason "<why no kind fits>" \
     --deadline <when> --terminal TOK,TOK [...]
 
-paseo-monitor kinds             # the kind table: name, params, floors
-paseo-monitor ls                # watches: kind, target, state, nextDue, reason
-paseo-monitor status [<id>]     # + recovery fields; WARN lines on stderr
-paseo-monitor log <id> [-n N] [-f]
-paseo-monitor poke <id>         # probe now, out of band; also resumes a park
-paseo-monitor rm <id> | --all
-paseo-monitor reap              # drop long-expired watches
+`paseo-monitor kinds`             # the kind table: name, params, floors
+`paseo-monitor ls`                # live watches + owner/report_to/ours
+`paseo-monitor status [<id>]`     # + recovery fields; WARN lines on stderr
+`paseo-monitor log <id> [-n N] [-f]`
+`paseo-monitor poke <id>`         # probe now, out of band; also resumes a park
+`paseo-monitor rm <id> | --all | --all-agents`
+`paseo-monitor reap`              # drop expired watches and graveyard entries
+`paseo-monitor version | --version`
 ```
 
 `--deadline <when>` is required for every watch; malformed values are rejected separately.
+`--provider` is optional. It accepts a provider name or `provider/model`; when
+`--failsafe` is enabled and it is omitted, selection is the calling agent's
+provider, then the first available and enabled provider.
+
+`rm <id>` and `rm --all` are caller-scoped. Use `--all-agents` for cross-owner
+removal; it lists every live watch and owner before acting. There is no
+interactive prompt: the caller is an unattended agent, and a prompt would
+hang it rather than protect it.
 
 `poke`, not `drain` — `drain` is queue vocabulary meaning something else.
 
@@ -1251,9 +1287,18 @@ Ownership stays caller-side: `--failsafe` is **opt-in by the caller**, so the
 user's ruling that the tool must not own the guarantee still holds. The tool
 materializes what the caller asked for and cleans up after itself.
 
-The printed copy-pasteable command stays as the fallback for callers who do not
-pass `--failsafe`. Registration output continues to state plainly: *delivery is
-best-effort; this tool does not guarantee wake-up.*
+`--provider` accepts a provider name or `provider/model`; when omitted for
+`--failsafe`, the tool selects the calling agent's provider, then the first
+available and enabled provider. The selected provider is passed to schedule
+creation. If schedule creation fails, registration warns, still prints the
+watch id, exits 0, and prints a `paseo schedule create` fallback. The emitted
+fallback currently omits `--provider`; if the installed Paseo CLI requires
+one, add an available provider before running it. This is a Layer 4 backstop
+failure; it must never take down Layer 1 observation.
+
+The fallback command is also printed for callers who do not pass `--failsafe`.
+Registration output continues to state plainly: *delivery is best-effort; this
+tool does not guarantee wake-up.*
 
 `SKILL.md` teaches the ritual as one unit: register watch (with `--failsafe`) →
 turn-start `status` → on report, the tool clears the schedule → on failsafe
@@ -1274,6 +1319,13 @@ garbage-collectable under the old model; now it is load-bearing.
   flag.
 - Write the deadline into the watch spec at registration, so the caller's
   heartbeat prompt can reference it independently of the tool.
+
+Explicit `rm` archives the removed watch under `graveyard/<watch-id>/` and
+leaves a compatibility link at `watches/<watch-id>`. `status <id>` and
+`log <id>` resolve that retained evidence until `reap` removes it after the
+same 30-day TTL used for expired watches. A queued report can outlive its
+watch, so the envelope's `log=` citation pointer must keep resolving after
+removal.
 
 ## Security
 
@@ -1303,8 +1355,9 @@ main virtue of the taxonomy, and why `--script` must stay the rare path.
 $PASEO_MONITOR_HOME/            # default ~/.paseo-monitor
   sweep.lock/                   # global mkdir lock; lock/pid inside
   sweep.log                     # sweeper events, rotated
-  watches/<watch-id>/
-    spec                        # kind, params, report-to, interval, deadline, terminal, max-fires, reason
+  sweep.beacon                  # last-sweep freshness beacon
+  watches/<watch-id>/            # live watch; compatibility link if removed
+    spec                        # kind, params, owner, report_to, provider, policy
     context                     # --context body
     probe                       # snapshotted probe (--script only)
     last                        # last observed token
@@ -1315,6 +1368,7 @@ $PASEO_MONITOR_HOME/            # default ~/.paseo-monitor
     undelivered                 # flag: report recorded, enqueue not confirmed
     fires                       # delivered report count
     log                         # per-watch event log, rotated
+  graveyard/<watch-id>/         # removed watch evidence and routing
 ```
 
 Env knobs follow `paseo-queue`'s split: external `PASEO_MONITOR_*`, read once

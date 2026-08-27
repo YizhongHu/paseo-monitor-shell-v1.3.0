@@ -43,6 +43,24 @@ N` reports `class=exhausted` with `new=MAX-FIRES-REACHED` once the cap is
 reached, then reporting stops while the watch log continues to record every
 token change. These reports bypass `--report-on` and `--report-transitions`.
 
+Ownership is explicit: `ls` and `status` show `owner=`, `report_to=`, and
+`ours=yes|no`. `rm <id>` removes only the caller's watch; `rm --all` is scoped
+to the caller. Use `rm --all-agents` for cross-owner removal: it lists every
+live watch with owner, `report_to`, and target before removing them. There is
+no interactive prompt: the caller is an unattended agent, and a prompt would
+hang it rather than protect it. Each removal prints the deleted watch with
+owner, `report_to`, and target.
+
+Removed watches move to a graveyard retained under the same 30-day `reap` TTL.
+`status <id>` and `log <id>` continue to resolve the removed watch. A queued
+report can outlive its watch, so the envelope's `log=` citation pointer must
+keep resolving after removal.
+
+Removal is not reversible by re-registering the target: a third party can
+create a new watch, but cannot recover the removed watch's `report_to`,
+`deliver`, `context`, `prohibit`, `labels`, or `deadline` into that new
+registration.
+
 ```sh
 paseo-monitor watch --kind <kind> [kind args] --deadline <when> [options]
 paseo-monitor watch --script <file> --reason "<why no kind fits>" --deadline <when> [options]
@@ -51,17 +69,18 @@ paseo-monitor ls
 paseo-monitor status [<id>]
 paseo-monitor log <id> [-n N] [-f]
 paseo-monitor poke <id>
-paseo-monitor rm <id> | --all
+paseo-monitor rm <id> | --all | --all-agents
 paseo-monitor reap
+paseo-monitor version | --version
 paseo-monitor _sweep
 ```
 
 `--deadline <when>` is required for every watch; malformed deadline values are rejected separately.
 
 Common watch options include `--report-transitions`, `--report-on TOK,TOK`,
-`--label k=v`, `--prohibit TEXT`, `--failsafe`, `--max-fires N`, `--max-runs N`,
-`--expires-in DURATION`, and `--no-start-report`. `--with-reason` is the Slurm
-reason-detail switch;
+`--label k=v`, `--prohibit TEXT`, `--failsafe`, `--provider PROVIDER[/MODEL]`,
+`--max-fires N`, `--max-runs N`, `--expires-in DURATION`, and
+`--no-start-report`. `--with-reason` is the Slurm reason-detail switch;
 reason tokens in `--report-on` derive it automatically. Slurm and PBS have
 120-second floors; their defaults are 600 seconds terminal-only and 300
 seconds when transitions are enabled. Other kind floors and defaults are
@@ -93,7 +112,13 @@ pointer-only prompt contains the watch id, the `status`/`log` procedure, and
 the opaque prohibition text, never routing or state. A clean `started` report
 leaves the schedule in place; a clean terminal report removes it. Use
 `--max-runs` and `--expires-in` for explicit bounds; without them, one run
-expires at the watch deadline.
+expires at the watch deadline. If schedule creation fails, registration warns,
+still prints the watch id, exits 0, and prints a `paseo schedule create`
+fallback. The emitted fallback currently omits `--provider`; if the installed
+Paseo CLI requires one, add an available provider before running it. The
+optional Layer 4 backstop must never take down Layer 1 observation.
+`--provider PROVIDER[/MODEL]` selects the schedule provider; without it, the
+caller's provider is used, then the first available and enabled provider.
 
 At registration the tool attempts to harvest the caller's `role`, `job`,
 `item`, and `lane` labels from `paseo inspect "$PASEO_AGENT_ID" --json` when
@@ -137,11 +162,14 @@ file; that workaround observes the artifact rather than inventing a verdict.
 ## State and knobs
 
 Default state is `~/.paseo-monitor`. The state root contains `sweep.lock/`,
-`sweep.log`, `sweep.beacon`, and `watches/<watch-id>/` directories. A watch
-directory contains `spec`, `context`, `probe`, `last`, `detail`, `dwell`,
-`nextDue`, `health`, `state`, `undelivered`, `fires`, and `log` as applicable.
-lock is mkdir-based and all mutable files use atomic temporary-file plus `mv`
-writes.
+`sweep.log`, `sweep.beacon`, `watches/<watch-id>/`, and
+`graveyard/<watch-id>/`. Removed watches retain their spec, context, log, and
+routing data in the graveyard under the same 30-day `reap` TTL; the
+`watches/<watch-id>` compatibility link keeps `status`/`log` citations
+resolvable. A queued report can outlive its watch, so the envelope's `log=`
+citation pointer must keep resolving after removal. A watch directory contains
+`spec`, `context`, `probe`, `last`, `detail`, `dwell`, `nextDue`, `health`,
+`state`, `undelivered`, `fires`, and `log` as applicable.
 
 External knobs are read once at process startup into internal `PM_*` variables;
 runtime code must use only the internal names:
@@ -175,6 +203,9 @@ launchd user agent `com.paseo-monitor.sweep` with `StartInterval=60` and
 bare cron process. Re-running the installer safely reloads the marked plist;
 `./install.sh uninstall` removes the agent and CLI symlink without deleting
 watch state.
+
+`paseo-monitor version` and `paseo-monitor --version` print
+`paseo-monitor v1.2.0`.
 
 ## Development
 
