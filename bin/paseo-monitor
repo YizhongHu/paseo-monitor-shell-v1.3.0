@@ -9,6 +9,10 @@ PM_LOG_MAX_BYTES="${PASEO_MONITOR_LOG_MAX_BYTES:-5242880}"
 PM_LOCK_GRACE_SECONDS="${PASEO_MONITOR_LOCK_GRACE_SECONDS:-5}"
 PM_BACKOFF_SCALE="${PASEO_MONITOR_BACKOFF_SCALE:-1}"
 PM_FAST_SWEEP="${PASEO_MONITOR_FAST_SWEEP:-0}"
+case "$PM_LOG_MAX_BYTES" in ''|*[!0-9]*) PM_LOG_MAX_BYTES=5242880 ;; esac
+case "$PM_LOCK_GRACE_SECONDS" in ''|*[!0-9]*) PM_LOCK_GRACE_SECONDS=5 ;; esac
+case "$PM_BACKOFF_SCALE" in ''|*[!0-9]*) PM_BACKOFF_SCALE=1 ;; esac
+case "$PM_FAST_SWEEP" in 0|1) ;; *) PM_FAST_SWEEP=0 ;; esac
 
 LC_ALL=C
 export LC_ALL
@@ -22,11 +26,16 @@ A cheap, stateless watcher. One launchd-driven sweep observes due watches and
 reports state changes; it does not own a liveness guarantee.
 
 Subcommands:
-  watch --kind <kind> [kind args] [options]
-      Register a watch. Supported kinds and registration options are defined
-      in PLAN.md; implementation is not available yet.
-  watch --script <file> --reason "<why no kind fits>" [options]
+  watch --kind <kind> [kind args] \
+      [--report-to <agent>] [--interval <s>] [--deadline <when>] \
+      [--terminal TOK,TOK] [--report-on TOK,TOK] [--dwell <n-sweeps>] \
+      [--report-transitions] [--context <text>|--context-file <f>] \
+      [--label k=v ...] [--prohibit <text>] [--failsafe] [--max-fires <n>]
+      Register a watch; implementation is not available yet.
+  watch --script <file> --reason "<why no kind fits>" \
+      [--terminal TOK,TOK] [same common options as --kind]
       Register a snapshotted custom probe; implementation is not available yet.
+  # --script requires --reason; probes are direct argv and never sh -c.
   kinds
       Print the bundled kind table; implementation is not available yet.
   ls
@@ -140,7 +149,7 @@ set_state() {
 ensure_dirs() {
     # ensure_dirs <dir> -- create the durable monitor directories.
     ed_dir="$1"
-    mkdir -p "$ed_dir/watches" "$ed_dir/tmp" || return 1
+    mkdir -p "$ed_dir/watches" || return 1
     return 0
 }
 
