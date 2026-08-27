@@ -17,7 +17,7 @@ case "$PM_FAST_SWEEP" in 0|1) ;; *) PM_FAST_SWEEP=0 ;; esac
 case "$PM_PROBE_TIMEOUT" in ''|*[!0-9]*) PM_PROBE_TIMEOUT=45 ;; esac
 PM_LAUNCHD_LABEL=com.paseo-monitor.sweep
 PM_INSTALLER="${PASEO_MONITOR_INSTALLER:-$(dirname "$0")/../install.sh}"
-PM_PY_AGENT_PROBE='import json,sys; d=json.load(sys.stdin); status=str(d.get("Status",d.get("status","UNKNOWN"))).upper(); archived=bool(d.get("Archived",d.get("archived",False))); perms=d.get("PendingPermissions",d.get("pendingPermissions",[])); perms=perms if isinstance(perms,list) else []; token="ARCHIVED" if archived else ("BLOCKED-PERMISSION" if perms else status); print("%s status=%s archived=%s pendingPermissions=%d" % (token,status,str(archived).lower(),len(perms)))'
+PM_PY_AGENT_PROBE='import json,sys; d=json.load(sys.stdin); status=str(d.get("Status",d.get("status","UNKNOWN"))).upper(); archived=bool(d.get("Archived",d.get("archived",False))) or bool(d.get("ArchivedAt",d.get("archivedAt",""))); perms=d.get("PendingPermissions",d.get("pendingPermissions",[])); perms=perms if isinstance(perms,list) else []; updated=d.get("UpdatedAt",d.get("updatedAt","")); token="ARCHIVED" if archived else ("BLOCKED-PERMISSION" if perms else status); prefix="went idle " if token=="IDLE" else ""; idle=(" idle_since="+str(updated)) if token=="IDLE" else ""; print("%s %sstatus=%s archived=%s pendingPermissions=%d queue_depth=%d updated_at=%s%s" % (token,prefix,status,str(archived).lower(),len(perms),len(perms),str(updated),idle))'
 
 LC_ALL=C
 export LC_ALL
@@ -543,6 +543,40 @@ pm_parse_probe_output() {
     PM_PARSED_DETAIL="$ppo_detail"
     return 0
 }
+
+pm_agent_dwell_accept() {
+    # pm_agent_dwell_accept <watch-dir> <token> -- return 1 while candidate is dwelling.
+    pada_dir="$1"
+    pada_token="$2"
+    pada_dwell="$(pm_spec_value dwell "$pada_dir/spec")"
+    case "$pada_token" in IDLE|RUNNING) ;; *) rm -f "$pada_dir/dwell"; return 0 ;; esac
+    pm_valid_uint "$pada_dwell" || pada_dwell=0
+    [ "$pada_dwell" -gt 1 ] || {
+        rm -f "$pada_dir/dwell"
+        return 0
+    }
+    pada_old="$(cat "$pada_dir/last" 2>/dev/null || printf '')"
+    [ "$pada_token" != "$pada_old" ] || {
+        rm -f "$pada_dir/dwell"
+        return 0
+    }
+    pada_saved="$(cat "$pada_dir/dwell" 2>/dev/null || printf '')"
+    pada_saved_token="${pada_saved%% *}"
+    pada_saved_count="${pada_saved#* }"
+    pm_valid_uint "$pada_saved_count" || pada_saved_count=0
+    if [ "$pada_saved_token" = "$pada_token" ]; then
+        pada_count=$((pada_saved_count + 1))
+    else
+        pada_count=1
+    fi
+    if [ "$pada_count" -lt "$pada_dwell" ]; then
+        pm_atomic_write "$pada_dir/dwell" "$pada_token $pada_count" || :
+        log_line "$pada_dir" DWELL "$pada_token count=$pada_count/$pada_dwell" || :
+        return 1
+    fi
+    rm -f "$pada_dir/dwell"
+    return 0
+}
  
 pm_run_registered_probe() {
     prp_dir="$1"
@@ -787,6 +821,7 @@ pm_backoff_delay() {
 pm_sweep_watch() {
     psw_dir="$1"
     [ -f "$psw_dir/spec" ] || return 0
+    psw_kind="$(pm_spec_value kind "$psw_dir/spec")"
     psw_state="$(cat "$psw_dir/state" 2>/dev/null || printf 'active')"
     psw_now="$(pm_now)"
     if [ -f "$psw_dir/undelivered" ]; then
@@ -872,18 +907,24 @@ pm_sweep_watch() {
         if pm_parse_probe_output "$psw_out"; then
             psw_new="$PM_PARSED_TOKEN"
             psw_detail="$PM_PARSED_DETAIL"
-            pm_atomic_write "$psw_dir/health" "0 healthy" || :
-            pm_atomic_write "$psw_dir/last" "$psw_new" || :
-            pm_atomic_write "$psw_dir/detail" "$psw_detail" || :
-            if [ "$psw_new" != "$psw_old" ]; then
-                psw_transition_stamp="$(TZ=America/New_York date '+%Y-%m-%dT%H:%M:%S%z')"
-                pm_atomic_write "$psw_dir/lastTransition" "$psw_transition_stamp" || :
-                log_line "$psw_dir" TOKEN-CHANGE "$psw_old -> $psw_new" "$psw_detail" || :
-                if pm_should_report_transition "$psw_dir" "$psw_new" "$(pm_spec_value terminal "$psw_dir/spec")"; then
-                    pm_report_event "$psw_dir" "$(pm_terminal_token "$psw_new" "$(pm_spec_value terminal "$psw_dir/spec")" && printf terminal || printf transition)" "$psw_old" "$psw_new" "$psw_detail" || :
-                fi
-                if pm_terminal_token "$psw_new" "$(pm_spec_value terminal "$psw_dir/spec")"; then
-                    [ -f "$psw_dir/undelivered" ] || set_state "$psw_dir" terminal || :
+            psw_accept=1
+            if [ "$psw_kind" = agent ] && ! pm_agent_dwell_accept "$psw_dir" "$psw_new"; then
+                psw_accept=0
+            fi
+            if [ "$psw_accept" -eq 1 ]; then
+                pm_atomic_write "$psw_dir/health" "0 healthy" || :
+                pm_atomic_write "$psw_dir/last" "$psw_new" || :
+                pm_atomic_write "$psw_dir/detail" "$psw_detail" || :
+                if [ "$psw_new" != "$psw_old" ]; then
+                    psw_transition_stamp="$(TZ=America/New_York date '+%Y-%m-%dT%H:%M:%S%z')"
+                    pm_atomic_write "$psw_dir/lastTransition" "$psw_transition_stamp" || :
+                    log_line "$psw_dir" TOKEN-CHANGE "$psw_old -> $psw_new" "$psw_detail" || :
+                    if pm_should_report_transition "$psw_dir" "$psw_new" "$(pm_spec_value terminal "$psw_dir/spec")"; then
+                        pm_report_event "$psw_dir" "$(pm_terminal_token "$psw_new" "$(pm_spec_value terminal "$psw_dir/spec")" && printf terminal || printf transition)" "$psw_old" "$psw_new" "$psw_detail" || :
+                    fi
+                    if pm_terminal_token "$psw_new" "$(pm_spec_value terminal "$psw_dir/spec")"; then
+                        [ -f "$psw_dir/undelivered" ] || set_state "$psw_dir" terminal || :
+                    fi
                 fi
             fi
         else
@@ -1019,10 +1060,10 @@ pm_watch_main() {
             --with-reason) pwm_with_reason=1; shift ;;
             *) echo "paseo-monitor: unknown watch option: $1" >&2; return 2 ;;
         esac
+    done
     case "$pwm_report_on" in
         *:*) pwm_with_reason=1 ;;
     esac
-    done
     if [ -n "$pwm_script" ] && [ -n "$pwm_kind" ]; then
         echo "paseo-monitor: choose --kind or --script, not both" >&2
         return 2
@@ -1033,6 +1074,10 @@ pm_watch_main() {
     fi
     [ -n "$pwm_script" ] && pwm_kind=script
     case "$pwm_kind" in slurm|globus|agent|file|git-ref|pr-merge|script) ;; *) echo "paseo-monitor: unknown kind: $pwm_kind" >&2; return 2 ;; esac
+    if [ "$pwm_kind" = agent ] && [ -z "$pwm_report_on" ]; then
+        pwm_report_on=BLOCKED-PERMISSION,CLOSED,ARCHIVED
+        pwm_report_transitions=1
+    fi
     if [ "$pwm_kind" = script ]; then
         [ -n "$pwm_reason" ] || { echo "paseo-monitor: --reason is mandatory with --script" >&2; return 2; }
         [ "$pwm_terminal_set" -eq 1 ] || { echo "paseo-monitor: --terminal is mandatory with --script" >&2; return 2; }

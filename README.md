@@ -35,6 +35,31 @@ paseo-monitor _sweep
 Registration output states that delivery is best-effort and makes no wake-up
 promise. The caller owns its liveness backstop.
 
+### Agent stall watch
+
+The `agent` kind watches stalls and observable lifecycle changes, not a
+guaranteed completion event:
+
+```sh
+paseo-monitor watch --kind agent --agent <id> \
+  --report-on BLOCKED-PERMISSION,CLOSED,ARCHIVED --dwell 2
+```
+
+`paseo inspect <id> --json` exposes `Status`, `Archived`/`ArchivedAt`,
+`PendingPermissions`, and `UpdatedAt`. Permission holds report as
+`BLOCKED-PERMISSION`; permission queue depth and verbatim `updated_at=` are
+included in the detail. For an idle observation the detail says `went idle`
+and includes `idle_since=` with that same unmodified `UpdatedAt` value. Use
+`--dwell N` to require N consecutive observations for an agent transition;
+this narrow flap control applies only to agents.
+
+**Measured gap:** a stopped agent is byte-identical to a normally finished
+agent (`Status=idle`, `Archived=False`, `PendingPermissions=[]`), and the CLI
+has no `stopped` status or attention field. No polling cadence can recover
+that absent state. The probe therefore says **went idle**, never **finished**.
+For certainty, pair this with an **absence watch** on a receipt or checkpoint
+file; that workaround observes the artifact rather than inventing a verdict.
+
 ## State and knobs
 
 Default state is `~/.paseo-monitor`. The state root contains `sweep.lock/`,
