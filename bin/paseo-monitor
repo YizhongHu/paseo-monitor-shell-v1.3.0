@@ -936,9 +936,11 @@ pm_schedule_create() {
     psc_max_runs="$3"
     psc_expires="$4"
     psc_prompt="$5"
+    PM_SCHEDULE_ERROR=""
     psc_out="$psc_dir/.failsafe.stdout"
     psc_err="$psc_dir/.failsafe.stderr"
     pm_paseo_bin "$psc_dir" || {
+        PM_SCHEDULE_ERROR=HELPER_NOT_FOUND
         printf 'paseo-monitor: required helper not found: paseo (--failsafe)\n' >&2
         return 127
     }
@@ -947,6 +949,8 @@ pm_schedule_create() {
         --max-runs "$psc_max_runs" --expires-in "$psc_expires" --json
     psc_rc=$?
     if [ "$psc_rc" -ne 0 ]; then
+        PM_SCHEDULE_ERROR="$(sed -n 's/.*\(MISSING_PROVIDER\).*/\1/p' "$psc_err" 2>/dev/null | sed -n '1p')"
+        [ -n "$PM_SCHEDULE_ERROR" ] || PM_SCHEDULE_ERROR=SCHEDULE_CREATE_FAILED
         [ -s "$psc_err" ] && cat "$psc_err" >&2
         rm -f "$psc_out" "$psc_err"
         return "$psc_rc"
@@ -1551,11 +1555,10 @@ labels=$pwm_labels"
             pwm_failsafe_expires="${pwm_failsafe_delay}s"
         fi
         pwm_failsafe_prompt="paseo-monitor status $pwm_id before anything else; then inspect paseo-monitor log $pwm_id. PROHIBITIONS: ${pwm_prohibit:-"(none)"}"
-        pm_schedule_create "$pwm_dir" "$pwm_failsafe_expires" "$pwm_max_runs" "$pwm_failsafe_expires" "$pwm_failsafe_prompt" || {
-            echo "paseo-monitor: failsafe schedule creation failed" >&2
-            rm -rf "$pwm_dir"
-            return 1
-        }
+        if ! pm_schedule_create "$pwm_dir" "$pwm_failsafe_expires" "$pwm_max_runs" "$pwm_failsafe_expires" "$pwm_failsafe_prompt"; then
+            printf 'paseo-monitor: WARN failsafe schedule not created (%s); caller owns the liveness backstop\n' \
+                "${PM_SCHEDULE_ERROR:-SCHEDULE_CREATE_FAILED}" >&2
+        fi
     fi
     log_line "$pwm_dir" REGISTER "token=$PM_PARSED_TOKEN" "detail=$PM_PARSED_DETAIL" || :
     pwm_trigger="$(pm_trigger_state)"
