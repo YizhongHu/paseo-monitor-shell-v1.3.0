@@ -34,7 +34,7 @@ assert_grep "$remote_dir/err" 'network-class ssh-rc=255' "network class evidence
 mock_ssh_script "0${tab}/scratch/result"
 pm_run_registered_probe "$remote_dir" "$remote_dir/out" "$remote_dir/err" || fail "remote file probe failed"
 pm_parse_probe_output "$remote_dir/out" || fail "remote file output invalid"
-assert_eq "$PM_PARSED_TOKEN" PRESENT "remote file present token"
+assert_eq "$PM_PARSED_TOKEN" EXISTS "remote file present token"
 assert_grep "$MOCK_DIR/calls.log" 'ssh -o BatchMode=yes -o ConnectTimeout=15 cannon ls -d /scratch/result' "remote file argv"
 
 mock_ssh_script "1${tab}${tab}ls: cannot access /scratch/result: No such file"

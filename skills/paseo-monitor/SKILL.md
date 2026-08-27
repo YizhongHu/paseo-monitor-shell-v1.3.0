@@ -62,6 +62,14 @@ paseo-monitor watch --script ./probe.sh --reason "the target needs a custom dire
   --terminal DONE --context 'target=custom-id changed=running; item=ITEM-ID; sha=FULL_SHA; branch=BRANCH; purpose=wait for custom result; next-owner=caller; evidence=artifact:/path/to/log; prohibitions=no shell-string execution'
 ```
 
+`file-exists` emits `ABSENT` or `EXISTS`. Use it for the absence pattern:
+key the watch to a pre-agreed receipt or checkpoint path, not to a job id that
+may never exist. An `ABSENT -> EXISTS` edge reports successful appearance;
+`ABSENT` through the deadline produces one deadline event, which covers a
+synchronously rejected submission with no job id. With `--host`, the probe
+uses SSH `BatchMode` and `ConnectTimeout` and follows remote auth parking and
+facility cadence floors.
+
 The `--context` resume format is required: target id and what changed; Task
 Orchestrator item id; exact full SHA and branch; why or purpose; who owns the
 next action; one evidence line citing an artifact; and prohibitions. `branch`

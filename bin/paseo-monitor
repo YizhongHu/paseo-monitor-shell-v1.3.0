@@ -44,7 +44,7 @@ pm_kind_table() {
         'slurm | Slurm job state | --host <host> --job <id> | floor=120 | default=600 terminal-only, 300 transitions' \
         'globus | Globus transfer status | --task <id> | floor=60 | default=300' \
         'agent | Paseo agent status | --agent <id> [--report-on <tokens>] [--dwell <sweeps>] | floor=60 | default=60' \
-        'file-exists | File existence | --path <path> [--host <host>] | floor=60 | default=60' \
+        'file-exists | File existence | --path <path> [--host <host>] | floor=60 local, 120 remote | default=60 local, 120 remote' \
         'git-ref | Git ref SHA | --remote <remote> --ref <ref> | floor=60 | default=120' \
         'pr-merge | Pull request merge state | --repo <owner/repo> --pr <number> | floor=60 | default=300' \
         'script | Custom executable | --script <file> --reason "<why no kind fits>" | floor=60 | default=60'
@@ -690,7 +690,7 @@ pm_run_registered_probe() {
             prp_rc=$?
             if [ "$prp_rc" -eq 0 ]; then
                 prp_file_detail="$(sed -n '1p' "$prp_out")"
-                printf 'PRESENT %s\n' "$prp_file_detail" > "$prp_out"
+                printf 'EXISTS %s\n' "$prp_file_detail" > "$prp_out"
                 return 0
             fi
             [ -n "$prp_host" ] && [ "$prp_rc" -eq 255 ] && return "$prp_rc"
@@ -1024,10 +1024,14 @@ pm_sweep() {
  
 pm_kind_floor() {
     pkf_kind="$1"
+    pkf_host="${2:-}"
     case "$pkf_kind" in
         slurm) printf '120\n' ;;
         globus|git-ref|pr-merge) printf '60\n' ;;
-        agent|file-exists|script) printf '60\n' ;;
+        file-exists)
+            [ -n "$pkf_host" ] && printf '120\n' || printf '60\n'
+            ;;
+        agent|script) printf '60\n' ;;
         *) printf '60\n' ;;
     esac
 }
@@ -1035,12 +1039,16 @@ pm_kind_floor() {
 pm_kind_default_interval() {
     pkdi_kind="$1"
     pkdi_transitions="$2"
+    pkdi_host="${3:-}"
     case "$pkdi_kind:$pkdi_transitions" in
         slurm:0) printf '600\n' ;;
         slurm:1) printf '300\n' ;;
         globus:*) printf '300\n' ;;
         git-ref:*) printf '120\n' ;;
         pr-merge:*) printf '300\n' ;;
+        file-exists:*)
+            [ -n "$pkdi_host" ] && printf '120\n' || printf '60\n'
+            ;;
         *) printf '60\n' ;;
     esac
 }
@@ -1134,6 +1142,9 @@ pm_watch_main() {
         pm_match_csv MERGED "$pwm_terminal" || pwm_terminal="${pwm_terminal},MERGED"
         pm_match_csv CLOSED "$pwm_terminal" || pwm_terminal="${pwm_terminal},CLOSED"
     fi
+    if [ "$pwm_kind" = file-exists ]; then
+        pm_match_csv EXISTS "$pwm_terminal" || pwm_terminal="${pwm_terminal},EXISTS"
+    fi
     if [ "$pwm_kind" = agent ] && [ -z "$pwm_report_on" ]; then
         pwm_report_on=BLOCKED-PERMISSION,CLOSED,ARCHIVED
         pwm_report_transitions=1
@@ -1151,8 +1162,8 @@ pm_watch_main() {
         git-ref) [ -n "$pwm_remote" ] && [ -n "$pwm_ref" ] || { echo "paseo-monitor: git-ref needs --remote and --ref" >&2; return 2; } ;;
         pr-merge) [ -n "$pwm_repo" ] && [ -n "$pwm_pr" ] || { echo "paseo-monitor: pr-merge needs --repo and --pr" >&2; return 2; } ;;
     esac
-    pwm_floor="$(pm_kind_floor "$pwm_kind")"
-    [ -n "$pwm_interval" ] || pwm_interval="$(pm_kind_default_interval "$pwm_kind" "$pwm_report_transitions")"
+    pwm_floor="$(pm_kind_floor "$pwm_kind" "$pwm_host")"
+    [ -n "$pwm_interval" ] || pwm_interval="$(pm_kind_default_interval "$pwm_kind" "$pwm_report_transitions" "$pwm_host")"
     pm_valid_uint "$pwm_interval" || { echo "paseo-monitor: interval must be an integer" >&2; return 2; }
     [ "$pwm_interval" -ge "$pwm_floor" ] || { echo "paseo-monitor: interval $pwm_interval is below $pwm_kind floor $pwm_floor" >&2; return 2; }
     pm_valid_uint "$pwm_dwell" || { echo "paseo-monitor: dwell must be an integer" >&2; return 2; }
