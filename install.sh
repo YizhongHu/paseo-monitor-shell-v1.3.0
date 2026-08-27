@@ -10,6 +10,7 @@ PM_HOME=${PASEO_MONITOR_HOME:-"$HOME/.paseo-monitor"}
 PM_LABEL=com.paseo-monitor.sweep
 PM_PLIST="$HOME/Library/LaunchAgents/$PM_LABEL.plist"
 PM_TEMPLATE="$REPO_DIR/launchd/$PM_LABEL.plist.in"
+PM_SKILL_SOURCE="$REPO_DIR/skills/paseo-monitor/SKILL.md"
 
 PM_SOURCE_ONLY=1
 export PM_SOURCE_ONLY PASEO_MONITOR_HOME
@@ -29,6 +30,19 @@ pm_launchd_print() {
     launchctl print "gui/$(id -u)/$PM_LABEL" >/dev/null 2>&1
 }
 
+pm_install_skills() {
+    [ -f "$PM_SKILL_SOURCE" ] || {
+        echo "install.sh: skill source missing: $PM_SKILL_SOURCE" >&2
+        exit 1
+    }
+    for pis_root in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"; do
+        mkdir -p "$pis_root/paseo-monitor"
+        if ! cmp -s "$PM_SKILL_SOURCE" "$pis_root/paseo-monitor/SKILL.md" 2>/dev/null; then
+            cp "$PM_SKILL_SOURCE" "$pis_root/paseo-monitor/SKILL.md"
+        fi
+    done
+}
+
 pm_install_agent() {
     [ "$(id -u)" != 0 ] || {
         echo "install.sh: refusing to run as root" >&2
@@ -46,6 +60,7 @@ pm_install_agent() {
     chmod +x "$REPO_DIR/bin/paseo-monitor"
     mkdir -p "$HOME/.local/bin" "$HOME/Library/LaunchAgents"
     ln -sf "$REPO_DIR/bin/paseo-monitor" "$HOME/.local/bin/paseo-monitor"
+    pm_install_skills
     if [ -f "$PM_PLIST" ] && ! grep -q 'paseo-monitor: managed launchd agent' "$PM_PLIST"; then
         echo "install.sh: refusing to replace unmanaged plist: $PM_PLIST" >&2
         exit 1
