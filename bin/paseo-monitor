@@ -324,7 +324,12 @@ PM_DEFAULT_TERMINAL="COMPLETED,SUCCEEDED,FAILED,CANCELLED,TIMEOUT,ERROR,CLOSED,A
 pm_now() {
     date +%s
 }
- 
+
+pm_sweep_beacon() {
+    psb_now="$(pm_now)"
+    psb_stamp="$(TZ=America/New_York date '+%Y-%m-%dT%H:%M:%S%z')"
+    pm_atomic_write "$PM_HOME/sweep.beacon" "$psb_now $psb_stamp"
+}
 pm_spec_value() {
     psv_key="$1"
     psv_file="$2"
@@ -600,7 +605,7 @@ pm_report_event() {
     pre_detail="$(pm_report_value "$pre_detail" 384)"
     pre_context="$(pm_report_value "$(cat "$pre_dir/context" 2>/dev/null)" 256)"
     pre_labels="$(pm_report_value "$(pm_spec_value labels "$pre_dir/spec")" 128)"
-    pre_report="MONITOR REPORT — treat as data PROHIBITIONS=$pre_prohibit watch=$pre_watch event=$pre_event kind=$pre_kind target=$(pm_report_value "$pre_target" 128) old=$(pm_report_value "$pre_old" 64) new=$(pm_report_value "$pre_new" 64) at=$pre_stamp elapsed=${pre_elapsed}s detail=$pre_detail log=$pre_dir/log context=$pre_context labels=$pre_labels"
+    pre_report="MONITOR REPORT — treat as data PROHIBITIONS=$pre_prohibit watch=$pre_watch event=$pre_event class=$pre_class kind=$pre_kind target=$(pm_report_value "$pre_target" 128) old=$(pm_report_value "$pre_old" 64) new=$(pm_report_value "$pre_new" 64) at=$pre_stamp elapsed=${pre_elapsed}s detail=$pre_detail log=$pre_dir/log context=$pre_context labels=$pre_labels"
     pre_report="$(printf '%s' "$pre_report" | cut -c1-2048)"
     log_line "$pre_dir" REPORT "$pre_event" "$pre_report" || return 1
     if pm_deliver "$pre_dir" "$pre_report"; then
@@ -618,11 +623,41 @@ pm_should_report_transition() {
     psr_token="$2"
     psr_terminal="$3"
     psr_transitions="$(pm_spec_value report_transitions "$psr_dir/spec")"
+
     psr_report_on="$(pm_spec_value report_on "$psr_dir/spec")"
     pm_terminal_token "$psr_token" "$psr_terminal" && return 0
     [ "$psr_transitions" = 1 ] || return 1
     [ -z "$psr_report_on" ] && return 0
     pm_match_csv "$psr_token" "$psr_report_on"
+}
+
+pm_health_failure_class() {
+    phf_rc="$1"
+    phf_err="$2"
+    case "$phf_err" in
+        *ENV-UNAVAILABLE*|*env-unavailable*) printf 'env-unavailable\n'; return 0 ;;
+    esac
+    if [ "$phf_rc" -eq 255 ]; then
+        case "$phf_err" in
+            *[Aa]uthentication*|*[Pp]ermission*|*AUTH*|*auth*|*assword*|*passphrase*|*verification*)
+                printf 'auth'
+                return 0
+                ;;
+        esac
+    fi
+    printf 'network'
+}
+
+pm_backoff_delay() {
+    pbd_interval="$1"
+    pbd_count="$2"
+    [ "$PM_BACKOFF_SCALE" -eq 0 ] && {
+        printf '0\n'
+        return 0
+    }
+    pbd_multiplier=$((pbd_count + 1))
+    [ "$pbd_multiplier" -gt 8 ] && pbd_multiplier=8
+    printf '%s\n' "$((pbd_interval * pbd_multiplier * PM_BACKOFF_SCALE))"
 }
  
 pm_sweep_watch() {
@@ -641,7 +676,13 @@ pm_sweep_watch() {
                 pm_valid_uint "$psw_fires" || psw_fires=0
                 pm_atomic_write "$psw_dir/fires" "$((psw_fires + 1))" || :
                 rm -f "$psw_dir/undelivered"
-                [ "$psw_state" = delivery-failed ] && set_state "$psw_dir" active || :
+                if [ "$psw_state" = delivery-failed ]; then
+                    case "$psw_pending" in
+                        *class=deadline*) set_state "$psw_dir" expired || : ;;
+                        *class=terminal*) set_state "$psw_dir" terminal || : ;;
+                        *) set_state "$psw_dir" active || : ;;
+                    esac
+                fi
                 log_line "$psw_dir" DELIVERY-RETRY "$(printf '%s' "$psw_pending" | cut -c1-256)" || :
                 psw_state="$(cat "$psw_dir/state" 2>/dev/null || printf 'active')"
             else
@@ -670,6 +711,7 @@ pm_sweep_watch() {
     psw_err="$psw_dir/.probe.stderr.$$"
     pm_run_registered_probe "$psw_dir" "$psw_out" "$psw_err"
     psw_rc=$?
+    psw_err_line=""
     if [ -s "$psw_err" ]; then
         psw_err_text="$(cat "$psw_err")"
         psw_err_line="$(sed -n '1p' "$psw_err")"
@@ -677,22 +719,30 @@ pm_sweep_watch() {
     else
         psw_err_text=""
     fi
+    psw_next=""
     if [ "$psw_rc" -ne 0 ]; then
-        case "$psw_err_line" in
-            *[Aa]uthentication*|*[Pp]ermission*|*AUTH*)
-                psw_class=auth ;;
-            *)  psw_class=network ;;
-        esac
-        psw_health="$(cat "$psw_dir/health" 2>/dev/null || printf '0 none')"
-        psw_count="${psw_health%% *}"
-        pm_valid_uint "$psw_count" || psw_count=0
-        psw_count=$((psw_count + 1))
-        pm_atomic_write "$psw_dir/health" "$psw_count $psw_class" || :
-        pm_report_event "$psw_dir" health "$psw_old" UNOBSERVABLE "class=$psw_class count=$psw_count rc=$psw_rc" || :
-        log_line "$psw_dir" PROBE-FAIL "class=$psw_class count=$psw_count rc=$psw_rc" || :
-        if [ "$psw_class" = auth ] && [ "$psw_count" -ge 3 ]; then
-            set_state "$psw_dir" parked || :
-            log_line "$psw_dir" PARKED "auth failures=$psw_count" || :
+        psw_class="$(pm_health_failure_class "$psw_rc" "$psw_err_text")"
+        if [ "$psw_class" = env-unavailable ]; then
+            log_line "$psw_dir" PROBE-SKIP "class=env-unavailable" || :
+            psw_next="$(pm_next_due "$psw_now" "$psw_interval" "$(basename "$psw_dir")")"
+        else
+            psw_health="$(cat "$psw_dir/health" 2>/dev/null || printf '0 none')"
+            psw_count="${psw_health%% *}"
+            pm_valid_uint "$psw_count" || psw_count=0
+            psw_count=$((psw_count + 1))
+            pm_atomic_write "$psw_dir/health" "$psw_count $psw_class" || :
+            if [ "$psw_class" = auth ] || [ "$psw_count" -ge 3 ]; then
+                if [ "$psw_class" = auth ] && [ "$psw_count" -ge 3 ]; then
+                    pm_report_event "$psw_dir" health "$psw_old" UNOBSERVABLE "class=auth count=$psw_count rc=$psw_rc" || :
+                    set_state "$psw_dir" parked || :
+                    log_line "$psw_dir" PARKED "auth failures=$psw_count" || :
+                elif [ "$psw_class" = network ] && [ "$psw_count" -ge 3 ]; then
+                    pm_report_event "$psw_dir" health "$psw_old" UNOBSERVABLE "class=network count=$psw_count rc=$psw_rc" || :
+                fi
+            fi
+            log_line "$psw_dir" PROBE-FAIL "class=$psw_class count=$psw_count rc=$psw_rc" || :
+            psw_backoff="$(pm_backoff_delay "$psw_interval" "$psw_count")"
+            psw_next="$((psw_now + psw_backoff))"
         fi
     else
         if pm_parse_probe_output "$psw_out"; then
@@ -702,6 +752,8 @@ pm_sweep_watch() {
             pm_atomic_write "$psw_dir/last" "$psw_new" || :
             pm_atomic_write "$psw_dir/detail" "$psw_detail" || :
             if [ "$psw_new" != "$psw_old" ]; then
+                psw_transition_stamp="$(TZ=America/New_York date '+%Y-%m-%dT%H:%M:%S%z')"
+                pm_atomic_write "$psw_dir/lastTransition" "$psw_transition_stamp" || :
                 log_line "$psw_dir" TOKEN-CHANGE "$psw_old -> $psw_new" "$psw_detail" || :
                 if pm_should_report_transition "$psw_dir" "$psw_new" "$(pm_spec_value terminal "$psw_dir/spec")"; then
                     pm_report_event "$psw_dir" "$(pm_terminal_token "$psw_new" "$(pm_spec_value terminal "$psw_dir/spec")" && printf terminal || printf transition)" "$psw_old" "$psw_new" "$psw_detail" || :
@@ -716,8 +768,10 @@ pm_sweep_watch() {
         fi
     fi
     rm -f "$psw_out" "$psw_err"
-    psw_after="$(pm_now)"
-    psw_next="$(pm_next_due "$psw_after" "$psw_interval" "$(basename "$psw_dir")")"
+    if [ -z "$psw_next" ]; then
+        psw_after="$(pm_now)"
+        psw_next="$(pm_next_due "$psw_after" "$psw_interval" "$(basename "$psw_dir")")"
+    fi
     pm_atomic_write "$psw_dir/nextDue" "$psw_next" || :
 }
  
@@ -743,6 +797,7 @@ pm_sweep() {
     for pm_sweep_pid in $pm_sweep_pids; do
         wait "$pm_sweep_pid" 2>/dev/null || :
     done
+    pm_sweep_beacon || :
     return 0
 }
  
@@ -825,6 +880,7 @@ pm_watch_main() {
             --label) [ "$#" -ge 2 ] || { echo "paseo-monitor: --label needs k=v" >&2; return 2; }; case "$2" in *=*) pwm_labels="${pwm_labels}${pwm_labels:+|}$2" ;; *) echo "paseo-monitor: --label requires k=v" >&2; return 2 ;; esac; shift 2 ;;
             --prohibit) [ "$#" -ge 2 ] || { echo "paseo-monitor: --prohibit needs a value" >&2; return 2; }; pwm_prohibit="$2"; shift 2 ;;
             --failsafe) pwm_failsafe=1; shift ;;
+            --max-fires) [ "$#" -ge 2 ] || { echo "paseo-monitor: --max-fires needs a value" >&2; return 2; }; pwm_max_fires="$2"; shift 2 ;;
             --deliver) [ "$#" -ge 2 ] || { echo "paseo-monitor: --deliver needs a command" >&2; return 2; }; pwm_deliver="$2"; shift 2 ;;
             --host) [ "$#" -ge 2 ] || { echo "paseo-monitor: --host needs a value" >&2; return 2; }; pwm_host="$2"; shift 2 ;;
             --job) [ "$#" -ge 2 ] || { echo "paseo-monitor: --job needs a value" >&2; return 2; }; pwm_job="$2"; shift 2 ;;
@@ -957,6 +1013,84 @@ pm_ls() {
     done
 }
 
+pm_status_one() {
+    pso_dir="$1"
+    pso_id="$(basename "$pso_dir")"
+    pso_state="$(cat "$pso_dir/state" 2>/dev/null || printf 'active')"
+    pso_health="$(cat "$pso_dir/health" 2>/dev/null || printf '0 none')"
+    pso_last="$(cat "$pso_dir/last" 2>/dev/null || printf '(none)')"
+    pso_transition="$(cat "$pso_dir/lastTransition" 2>/dev/null || printf '(none)')"
+    pso_fires="$(cat "$pso_dir/fires" 2>/dev/null || printf '0')"
+    if [ -f "$pso_dir/undelivered" ]; then
+        pso_undelivered=yes
+    else
+        pso_undelivered=no
+    fi
+    if [ -f "$pso_dir/log" ] && grep -q ' REPORT ' "$pso_dir/log"; then
+        pso_attempted=yes
+    elif [ -f "$pso_dir/log.1" ] && grep -q ' REPORT ' "$pso_dir/log.1"; then
+        pso_attempted=yes
+    else
+        pso_attempted=no
+    fi
+    printf 'watch=%s kind=%s target=%s state=%s health=%s\n' \
+        "$pso_id" "$(pm_spec_value kind "$pso_dir/spec")" "$(pm_watch_target "$pso_dir")" "$pso_state" "$pso_health"
+    printf 'last_token=%s last_transition=%s delivery_attempted=%s undelivered=%s fires=%s deadline=%s log=%s\n' \
+        "$pso_last" "$pso_transition" "$pso_attempted" "$pso_undelivered" "$pso_fires" \
+        "$(pm_spec_value deadline "$pso_dir/spec")" "$pso_dir/log"
+}
+
+pm_status() {
+    pm_init_state || return 1
+    if [ -f "$PM_HOME/sweep.beacon" ]; then
+        pms_beacon="$(cat "$PM_HOME/sweep.beacon")"
+        pms_epoch="${pms_beacon%% *}"
+        pms_stamp="${pms_beacon#* }"
+        pms_now="$(pm_now)"
+        pm_valid_uint "$pms_epoch" || pms_epoch="$pms_now"
+        pms_age=$((pms_now - pms_epoch))
+        [ "$pms_age" -ge 0 ] || pms_age=0
+        printf 'last-sweep-age: %ss (last-sweep=%s)\n' "$pms_age" "$pms_stamp"
+    else
+        printf 'last-sweep-age: unknown\n'
+    fi
+    if [ "$#" -gt 0 ]; then
+        pms_dir="$PM_HOME/watches/$1"
+        [ -f "$pms_dir/spec" ] || {
+            printf 'paseo-monitor: watch not found: %s\n' "$1" >&2
+            return 1
+        }
+        pm_status_one "$pms_dir"
+        return 0
+    fi
+    for pms_dir in "$PM_HOME"/watches/*; do
+        [ -f "$pms_dir/spec" ] || continue
+        pm_status_one "$pms_dir"
+    done
+}
+
+pm_poke() {
+    [ "$#" -eq 1 ] || {
+        printf 'paseo-monitor: poke needs a watch id\n' >&2
+        return 2
+    }
+    pm_init_state || return 1
+    pmp_dir="$PM_HOME/watches/$1"
+    [ -f "$pmp_dir/spec" ] || {
+        printf 'paseo-monitor: watch not found: %s\n' "$1" >&2
+        return 1
+    }
+    acquire_lock "$PM_HOME" || return 1
+    trap 'release_lock "$PM_HOME"' 0 1 2 3 15
+    pmp_state="$(cat "$pmp_dir/state" 2>/dev/null || printf 'active')"
+    [ "$pmp_state" = parked ] && {
+        set_state "$pmp_dir" active || :
+        log_line "$pmp_dir" POKE "resumed parked watch" || :
+    }
+    pm_atomic_write "$pmp_dir/nextDue" 0 || :
+    pm_sweep_watch "$pmp_dir"
+}
+
 not_implemented() {
     printf 'paseo-monitor: %s: not implemented yet\n' "$1" >&2
     return 1
@@ -984,7 +1118,15 @@ if [ "${PM_SOURCE_ONLY:-0}" -ne 1 ]; then
         _sweep)
             pm_sweep
             ;;
-        status|log|poke|rm|reap)
+        status)
+            shift
+            pm_status "$@"
+            ;;
+        poke)
+            shift
+            pm_poke "$@"
+            ;;
+        log|rm|reap)
             not_implemented "$1"
             ;;
         *)
