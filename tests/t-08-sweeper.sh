@@ -20,7 +20,7 @@ EOF
 # A held live global lock makes _sweep skip quietly.
 printf 'LOCKED\n' > "$SANDBOX/lock-mode"
 write_probe "$SANDBOX/lock-probe" "$SANDBOX/lock-mode"
-lock_registration="$($PMT_BIN watch --script "$SANDBOX/lock-probe" --reason 'lock test' --terminal DONE --deadline +300)" || fail "lock watch registration failed"
+lock_registration="$($PMT_BIN watch --script "$SANDBOX/lock-probe" --reason 'lock test' --terminal DONE --no-start-report --deadline +300)" || fail "lock watch registration failed"
 lock_id=$(printf '%s\n' "$lock_registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 lock_dir="$PM_HOME/watches/$lock_id"
 sh -c 'PM_SOURCE_ONLY=1; export PM_SOURCE_ONLY; . "$1"; acquire_lock "$2"; sleep 2' sh "$PMT_BIN" "$PM_HOME" &
@@ -35,7 +35,7 @@ wait "$holder" 2>/dev/null || true
 # Intermediate changes always enter the evidence log, but report only when opted in.
 printf 'RUNNING\n' > "$SANDBOX/default-mode"
 write_probe "$SANDBOX/default-probe" "$SANDBOX/default-mode"
-default_registration="$($PMT_BIN watch --script "$SANDBOX/default-probe" --reason 'terminal only' --terminal DONE --deadline +300)" || fail "default watch registration failed"
+default_registration="$($PMT_BIN watch --script "$SANDBOX/default-probe" --reason 'terminal only' --terminal DONE --no-start-report --deadline +300)" || fail "default watch registration failed"
 default_id=$(printf '%s\n' "$default_registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 default_dir="$PM_HOME/watches/$default_id"
 printf 'PENDING\n' > "$SANDBOX/default-mode"
@@ -45,7 +45,7 @@ if grep -q ' REPORT ' "$default_dir/log"; then fail "terminal-only watch reporte
 
 printf 'RUNNING\n' > "$SANDBOX/transition-mode"
 write_probe "$SANDBOX/transition-probe" "$SANDBOX/transition-mode"
-transition_registration="$($PMT_BIN watch --script "$SANDBOX/transition-probe" --reason 'transition opt in' --terminal DONE --report-transitions --deadline +300)" || fail "transition watch registration failed"
+transition_registration="$($PMT_BIN watch --script "$SANDBOX/transition-probe" --reason 'transition opt in' --terminal DONE --report-transitions --no-start-report --deadline +300)" || fail "transition watch registration failed"
 transition_id=$(printf '%s\n' "$transition_registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 transition_dir="$PM_HOME/watches/$transition_id"
 printf 'PENDING\n' > "$SANDBOX/transition-mode"
@@ -56,7 +56,7 @@ assert_grep "$transition_dir/log" 'REPORT .*class=transition' "transition report
 # Terminal transitions report once and park the watch in terminal state.
 printf 'RUNNING\n' > "$SANDBOX/terminal-mode"
 write_probe "$SANDBOX/terminal-probe" "$SANDBOX/terminal-mode"
-terminal_registration="$($PMT_BIN watch --script "$SANDBOX/terminal-probe" --reason 'terminal event' --terminal DONE --deadline +300)" || fail "terminal watch registration failed"
+terminal_registration="$($PMT_BIN watch --script "$SANDBOX/terminal-probe" --reason 'terminal event' --terminal DONE --no-start-report --deadline +300)" || fail "terminal watch registration failed"
 terminal_id=$(printf '%s\n' "$terminal_registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 terminal_dir="$PM_HOME/watches/$terminal_id"
 printf 'DONE\n' > "$SANDBOX/terminal-mode"
@@ -70,7 +70,7 @@ assert_eq "$terminal_reports" 1 "terminal fires once"
 # max-fires limits deliveries, not observed token changes.
 printf 'A\n' > "$SANDBOX/max-mode"
 write_probe "$SANDBOX/max-probe" "$SANDBOX/max-mode"
-max_registration="$($PMT_BIN watch --script "$SANDBOX/max-probe" --reason 'max fires' --terminal DONE --report-transitions --max-fires 1 --deadline +300)" || fail "max watch registration failed"
+max_registration="$($PMT_BIN watch --script "$SANDBOX/max-probe" --reason 'max fires' --terminal DONE --report-transitions --max-fires 1 --no-start-report --deadline +300)" || fail "max watch registration failed"
 max_id=$(printf '%s\n' "$max_registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 max_dir="$PM_HOME/watches/$max_id"
 printf 'B\n' > "$SANDBOX/max-mode"

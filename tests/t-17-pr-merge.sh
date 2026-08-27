@@ -9,7 +9,7 @@ unset PM_SOURCE_ONLY
 
 MOCK_GH_STATE=OPEN
 export MOCK_GH_STATE
-merged_registration="$($PMT_BIN watch --kind pr-merge --repo OWNER/REPO --pr 123 --deadline +300)" || fail "pr-merge MERGED registration failed"
+merged_registration="$($PMT_BIN watch --kind pr-merge --repo OWNER/REPO --pr 123 --no-start-report --deadline +300)" || fail "pr-merge MERGED registration failed"
 merged_id=$(printf '%s\n' "$merged_registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 merged_dir="$PM_HOME/watches/$merged_id"
 assert_eq "$(cat "$merged_dir/last")" OPEN "PR starts open"
@@ -26,7 +26,7 @@ assert_grep "$merged_dir/log" 'class=terminal.*new=MERGED' "MERGED terminal enve
 
 MOCK_GH_STATE=OPEN
 export MOCK_GH_STATE
-closed_registration="$($PMT_BIN watch --kind pr-merge --repo OWNER/REPO --pr 124 --deadline +300)" || fail "pr-merge CLOSED registration failed"
+closed_registration="$($PMT_BIN watch --kind pr-merge --repo OWNER/REPO --pr 124 --no-start-report --deadline +300)" || fail "pr-merge CLOSED registration failed"
 closed_id=$(printf '%s\n' "$closed_registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 closed_dir="$PM_HOME/watches/$closed_id"
 assert_eq "$(cat "$closed_dir/last")" OPEN "second PR starts open"

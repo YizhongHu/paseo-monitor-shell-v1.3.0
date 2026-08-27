@@ -22,7 +22,7 @@ exit 0
 EOF
 chmod +x "$SANDBOX/deliver"
 
-registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'delivery test' --terminal DONE --report-transitions --context 'item=abc' --prohibit 'never retry' --label lane=L3 --deliver "$SANDBOX/deliver" --deadline +300)" || fail "arbitrary delivery registration failed"
+registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'delivery test' --terminal DONE --report-transitions --no-start-report --context 'item=abc' --prohibit 'never retry' --label lane=L3 --deliver "$SANDBOX/deliver" --deadline +300)" || fail "arbitrary delivery registration failed"
 id=$(printf '%s\n' "$registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 dir="$PM_HOME/watches/$id"
 printf 'DONE\n' > "$SANDBOX/mode"
@@ -40,7 +40,7 @@ assert_eq "$(cat "$dir/fires")" 1 "arbitrary delivery counts fire"
 [ ! -e "$dir/undelivered" ] || fail "successful delivery left undelivered flag"
 
 printf 'RUNNING\n' > "$SANDBOX/mode"
-queue_registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'queue test' --terminal DONE --report-transitions --report-to agent-123 --deliver paseo-queue --deadline +300)" || fail "paseo-queue registration failed"
+queue_registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'queue test' --terminal DONE --report-transitions --no-start-report --report-to agent-123 --deliver paseo-queue --deadline +300)" || fail "paseo-queue registration failed"
 queue_id=$(printf '%s\n' "$queue_registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 printf 'DONE\n' > "$SANDBOX/mode"
 $PMT_BIN _sweep || fail "paseo-queue delivery sweep failed"
@@ -61,7 +61,7 @@ exit 0
 EOF
 chmod +x "$SANDBOX/failing-deliver"
 printf 'RUNNING\n' > "$SANDBOX/mode"
-retry_registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'retry test' --terminal DONE --deliver "$SANDBOX/failing-deliver" --deadline +300)" || fail "retry registration failed"
+retry_registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'retry test' --terminal DONE --no-start-report --deliver "$SANDBOX/failing-deliver" --deadline +300)" || fail "retry registration failed"
 retry_id=$(printf '%s\n' "$retry_registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 retry_dir="$PM_HOME/watches/$retry_id"
 printf 'DONE\n' > "$SANDBOX/mode"

@@ -11,7 +11,7 @@ sha_a=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 sha_b=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 sha_c=cccccccccccccccccccccccccccccccccccccc
 printf '%s\trefs/heads/main\n' "$sha_a" > "$MOCK_DIR/git.output"
-registration="$($PMT_BIN watch --kind git-ref --remote https://example.invalid/repo.git --ref refs/heads/main --report-transitions --max-fires 1 --deadline +300)" || fail "git-ref registration failed"
+registration="$($PMT_BIN watch --kind git-ref --remote https://example.invalid/repo.git --ref refs/heads/main --report-transitions --max-fires 1 --no-start-report --deadline +300)" || fail "git-ref registration failed"
 watch_id=$(printf '%s\n' "$registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 [ -n "$watch_id" ] || fail "watch id missing"
 watch_dir="$PM_HOME/watches/$watch_id"

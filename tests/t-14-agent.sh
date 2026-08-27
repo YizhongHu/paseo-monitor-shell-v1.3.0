@@ -10,7 +10,7 @@ unset PM_SOURCE_ONLY
 cat > "$MOCK_DIR/inspect.json" <<'EOF'
 {"Status":"running","Archived":false,"PendingPermissions":[],"UpdatedAt":"2026-08-27T01:02:03Z"}
 EOF
-agent_reg="$($PMT_BIN watch --kind agent --agent agent-1 --report-on IDLE,BLOCKED-PERMISSION,CLOSED,ARCHIVED --deadline +300)" || fail "agent registration failed"
+agent_reg="$($PMT_BIN watch --kind agent --agent agent-1 --report-on IDLE,BLOCKED-PERMISSION,CLOSED,ARCHIVED --no-start-report --deadline +300)" || fail "agent registration failed"
 agent_id=$(printf '%s\n' "$agent_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 agent_dir="$PM_HOME/watches/$agent_id"
 assert_eq "$(cat "$agent_dir/last")" RUNNING "agent running token"
@@ -42,7 +42,7 @@ pmt_sweep_minimal_path || fail "back-filled legacy watch failed under minimal PA
 cat > "$MOCK_DIR/inspect.json" <<'EOF'
 {"Status":"running","Archived":false,"PendingPermissions":[],"UpdatedAt":"2026-08-27T01:08:09Z"}
 EOF
-d7_reg="$($PMT_BIN watch --kind agent --agent agent-1 --report-on IDLE --report-to agent-2 --deliver paseo-queue --deadline +300)" || fail "minimal-path delivery registration failed"
+d7_reg="$($PMT_BIN watch --kind agent --agent agent-1 --report-on IDLE --report-to agent-2 --no-start-report --deliver paseo-queue --deadline +300)" || fail "minimal-path delivery registration failed"
 d7_id=$(printf '%s\n' "$d7_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 d7_dir="$PM_HOME/watches/$d7_id"
 assert_eq "$(sed -n 's/^helper=//p' "$d7_dir/spec")" "$SANDBOX/bin/paseo" "minimal-path helper absolute"

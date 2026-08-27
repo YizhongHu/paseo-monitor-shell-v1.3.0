@@ -67,7 +67,7 @@ Subcommands:
       [--terminal TOK,TOK] [--report-on TOK,TOK] [--report-transitions] \
       [--with-reason] [--dwell <n-sweeps>] [--label k=v ...] \
       [--prohibit <text>] [--failsafe] [--max-fires <n>] \
-      [--max-runs <n>] [--expires-in <duration>]
+      [--max-runs <n>] [--expires-in <duration>] [--no-start-report] \
       [--deliver paseo-queue|<command>]
       Register a bundled probe.
   watch --script <file> --reason "<why no kind fits>" \
@@ -894,6 +894,7 @@ pm_deliver() {
         printf '%s' "$pmd_err_text" > "$pmd_err"
         printf 'paseo-monitor: WARN delivery-failed watch=%s backend=%s rc=%s\n' \
             "$(basename "$pmd_dir")" "$pmd_backend" "$pmd_rc" >&2
+        [ -n "$pmd_err_text" ] && printf '%s\n' "$pmd_err_text" >&2
         return "$pmd_rc"
     fi
     rm -f "$pmd_err"
@@ -1025,6 +1026,7 @@ pm_report_event() {
     pre_max="$(pm_spec_value max_fires "$pre_dir/spec")"
     pm_valid_uint "$pre_max" || pre_max=0
     pre_exempt="${6:-0}"
+    pre_count_fire="${7:-1}"
     if [ "$pre_max" -gt 0 ] && [ "$pre_fires" -ge "$pre_max" ] && [ "$pre_exempt" != 1 ]; then
         log_line "$pre_dir" SUPPRESSED "$pre_class" "$pre_old -> $pre_new" || :
         return 0
@@ -1048,9 +1050,11 @@ pm_report_event() {
     pre_report="$(printf '%s' "$pre_report" | cut -c1-2048)"
     log_line "$pre_dir" REPORT "$pre_event" "$pre_report" || return 1
     if pm_deliver "$pre_dir" "$pre_report"; then
-        pm_atomic_write "$pre_dir/fires" "$((pre_fires + 1))" || return 1
-        rm -f "$pre_dir/undelivered"
-        [ "$pre_exempt" = 1 ] || pm_announce_exhaustion "$pre_dir" || :
+        if [ "$pre_count_fire" = 1 ]; then
+            pm_atomic_write "$pre_dir/fires" "$((pre_fires + 1))" || return 1
+            rm -f "$pre_dir/undelivered"
+            [ "$pre_exempt" = 1 ] || pm_announce_exhaustion "$pre_dir" || :
+        fi
         return 0
     fi
     pre_delivery_err="$(cat "$pre_dir/.delivery.stderr" 2>/dev/null || printf '')"
@@ -1136,9 +1140,15 @@ pm_sweep_watch() {
             *) psw_pending="$(pm_last_report "$psw_dir" 2>/dev/null || printf '')" ;;
         esac
             if pm_deliver "$psw_dir" "$psw_pending"; then
-                psw_fires="$(cat "$psw_dir/fires" 2>/dev/null || printf '0')"
-                pm_valid_uint "$psw_fires" || psw_fires=0
-                pm_atomic_write "$psw_dir/fires" "$((psw_fires + 1))" || :
+                case "$psw_pending" in
+                    *class=started*)
+                        ;;
+                    *)
+                        psw_fires="$(cat "$psw_dir/fires" 2>/dev/null || printf '0')"
+                        pm_valid_uint "$psw_fires" || psw_fires=0
+                        pm_atomic_write "$psw_dir/fires" "$((psw_fires + 1))" || :
+                        ;;
+                esac
                 rm -f "$psw_dir/undelivered"
                 if [ "$psw_state" = delivery-failed ]; then
                     case "$psw_pending" in
@@ -1336,6 +1346,7 @@ pm_watch_main() {
     pwm_with_reason=0
     pwm_dwell=0
     pwm_dwell_set=0
+    pwm_start_report=1
     pwm_context=""
     pwm_labels=""
     pwm_harvested_labels=""
@@ -1377,6 +1388,7 @@ pm_watch_main() {
             --prohibit) [ "$#" -ge 2 ] || { echo "paseo-monitor: --prohibit needs a value" >&2; return 2; }; pwm_prohibit="$2"; shift 2 ;;
             --failsafe) pwm_failsafe=1; shift ;;
             --max-fires) [ "$#" -ge 2 ] || { echo "paseo-monitor: --max-fires needs a value" >&2; return 2; }; pwm_max_fires="$2"; shift 2 ;;
+            --no-start-report) pwm_start_report=0; shift ;;
             --deliver) [ "$#" -ge 2 ] || { echo "paseo-monitor: --deliver needs a command" >&2; return 2; }; pwm_deliver="$2"; shift 2 ;;
             --host) [ "$#" -ge 2 ] || { echo "paseo-monitor: --host needs a value" >&2; return 2; }; pwm_host="$2"; shift 2 ;;
             --job) [ "$#" -ge 2 ] || { echo "paseo-monitor: --job needs a value" >&2; return 2; }; pwm_job="$2"; shift 2 ;;
@@ -1496,6 +1508,7 @@ max_runs=$pwm_max_runs
 expires_in=$pwm_expires_in
 max_fires=$pwm_max_fires
 exhausted=0
+start_report=$pwm_start_report
 deliver=$pwm_deliver
 deliver_mode=$pwm_deliver_mode
 python=$pwm_python
@@ -1554,6 +1567,9 @@ labels=$pwm_labels"
             set_state "$pwm_dir" terminal || :
             pm_clear_failsafe "$pwm_dir"
         fi
+    elif [ "$pwm_start_report" -eq 1 ]; then
+        pm_report_event "$pwm_dir" started "(none)" "$PM_PARSED_TOKEN" "$PM_PARSED_DETAIL" 1 0 || :
+        [ -f "$pwm_dir/undelivered" ] && set_state "$pwm_dir" active || :
     fi
     rm -f "$pwm_out" "$pwm_err"
     pwm_attempts=$(( (pwm_deadline_epoch - pwm_now + pwm_interval - 1) / pwm_interval ))

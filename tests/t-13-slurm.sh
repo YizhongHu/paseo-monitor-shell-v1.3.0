@@ -10,7 +10,7 @@ tab="$(printf '\t')"
 
 # Accounting lag is a healthy observation and maps to PENDING.
 mock_ssh_script "0${tab}"
-lag_reg="$($PMT_BIN watch --kind slurm --host cannon --job lag-1 --deadline +300)" || fail "accounting lag registration failed"
+lag_reg="$($PMT_BIN watch --kind slurm --host cannon --job lag-1 --no-start-report --deadline +300)" || fail "accounting lag registration failed"
 lag_id=$(printf '%s\n' "$lag_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 lag_dir="$PM_HOME/watches/$lag_id"
 assert_eq "$(cat "$lag_dir/last")" PENDING "empty sacct output maps to PENDING"
@@ -19,7 +19,7 @@ pm_atomic_write "$lag_dir/nextDue" 9999999999
 
 # sacct's first word is authoritative, including CANCELLED and TIMEOUT.
 mock_ssh_script "0${tab}RUNNING"
-term_reg="$($PMT_BIN watch --kind slurm --host cannon --job term-1 --deadline +300)" || fail "terminal registration failed"
+term_reg="$($PMT_BIN watch --kind slurm --host cannon --job term-1 --no-start-report --deadline +300)" || fail "terminal registration failed"
 term_id=$(printf '%s\n' "$term_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 term_dir="$PM_HOME/watches/$term_id"
 mock_ssh_script "0${tab}CANCELLED by 12345"
@@ -29,7 +29,7 @@ assert_eq "$(cat "$term_dir/last")" CANCELLED "cancelled first-word extraction"
 assert_grep "$term_dir/log" 'new=CANCELLED' "cancelled terminal report"
 
 mock_ssh_script "0${tab}RUNNING"
-time_reg="$($PMT_BIN watch --kind slurm --host cannon --job timeout-1 --deadline +300)" || fail "timeout registration failed"
+time_reg="$($PMT_BIN watch --kind slurm --host cannon --job timeout-1 --no-start-report --deadline +300)" || fail "timeout registration failed"
 time_id=$(printf '%s\n' "$time_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 time_dir="$PM_HOME/watches/$time_id"
 mock_ssh_script "0${tab}TIMEOUT"
@@ -40,7 +40,7 @@ assert_eq "$(cat "$time_dir/state")" terminal "TIMEOUT terminal state"
 
 # UNKNOWN is reportable once, not silently retried as a health failure.
 mock_ssh_script "0${tab}RUNNING"
-unknown_reg="$($PMT_BIN watch --kind slurm --host cannon --job unknown-1 --deadline +300)" || fail "unknown registration failed"
+unknown_reg="$($PMT_BIN watch --kind slurm --host cannon --job unknown-1 --no-start-report --deadline +300)" || fail "unknown registration failed"
 unknown_id=$(printf '%s\n' "$unknown_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 unknown_dir="$PM_HOME/watches/$unknown_id"
 mock_ssh_script "0${tab}UNKNOWN"
@@ -57,7 +57,7 @@ pm_atomic_write "$unknown_dir/nextDue" 9999999999
 : > "$MOCK_DIR/calls.log"
 reason_tab="$(printf '\t')"
 mock_ssh_script "0${reason_tab}PENDING\\nPASEO_MONITOR_SQUEUE\\nPENDING|Priority"
-reason_reg="$($PMT_BIN watch --kind slurm --host cannon --job reason-1 --report-on PENDING:Priority,PENDING:Resources --deadline +300)" || fail "reason registration failed"
+reason_reg="$($PMT_BIN watch --kind slurm --host cannon --job reason-1 --report-on PENDING:Priority,PENDING:Resources --no-start-report --deadline +300)" || fail "reason registration failed"
 reason_id=$(printf '%s\n' "$reason_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 reason_dir="$PM_HOME/watches/$reason_id"
 assert_eq "$(grep '^interval=' "$reason_dir/spec" | cut -d= -f2)" 300 "transition-reporting Slurm default interval"
@@ -76,7 +76,7 @@ pm_atomic_write "$reason_dir/nextDue" 9999999999
 # after RUNNING is not enough evidence for VANISHED.
 mock_ssh_script "0${tab}RUNNING"
 : > "$MOCK_DIR/calls.log"
-off_reg="$($PMT_BIN watch --kind slurm --host cannon --job reason-off --deadline +300)" || fail "reason-off registration failed"
+off_reg="$($PMT_BIN watch --kind slurm --host cannon --job reason-off --no-start-report --deadline +300)" || fail "reason-off registration failed"
 off_id=$(printf '%s\n' "$off_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 off_dir="$PM_HOME/watches/$off_id"
 mock_ssh_script "0${tab}"
@@ -90,7 +90,7 @@ pm_atomic_write "$off_dir/nextDue" 9999999999
 
 # Both accounting and queue disappearance after an observed running job is VANISHED.
 mock_ssh_script "0${reason_tab}RUNNING\\nPASEO_MONITOR_SQUEUE\\nRUNNING|None"
-vanish_reg="$($PMT_BIN watch --kind slurm --host cannon --job vanish-1 --with-reason --deadline +300)" || fail "vanished registration failed"
+vanish_reg="$($PMT_BIN watch --kind slurm --host cannon --job vanish-1 --with-reason --no-start-report --deadline +300)" || fail "vanished registration failed"
 vanish_id=$(printf '%s\n' "$vanish_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 vanish_dir="$PM_HOME/watches/$vanish_id"
 mock_ssh_script "0${reason_tab}\\nPASEO_MONITOR_SQUEUE\\n"

@@ -29,7 +29,7 @@ if $PMT_BIN watch --script "$SANDBOX/probe" --reason 'missing deadline' --termin
 fi
 
 # Deadline is a durable event and is suppressed after the first expiry.
-deadline_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'deadline test' --terminal DONE --deadline +300)" || fail "deadline registration failed"
+deadline_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'deadline test' --terminal DONE --no-start-report --deadline +300)" || fail "deadline registration failed"
 deadline_id=$(printf '%s\n' "$deadline_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 deadline_dir="$PM_HOME/watches/$deadline_id"
 pm_atomic_write "$deadline_dir/spec" "$(sed 's/^deadline=.*/deadline=1/' "$deadline_dir/spec")"
@@ -43,7 +43,7 @@ assert_grep "$deadline_dir/log" 'could not determine state; last observation RUN
 
 printf 'RUNNING\n' > "$SANDBOX/mode"
 # Auth failures count, park at strike three, and stop probing while parked.
-auth_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'auth test' --terminal DONE --deadline +300)" || fail "auth registration failed"
+auth_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'auth test' --terminal DONE --no-start-report --deadline +300)" || fail "auth registration failed"
 auth_id=$(printf '%s\n' "$auth_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 auth_dir="$PM_HOME/watches/$auth_id"
 printf 'AUTH\n' > "$SANDBOX/mode"
@@ -75,7 +75,7 @@ $PMT_BIN poke "$auth_id" || fail "poke failed"
 assert_eq "$(cat "$auth_dir/state")" active "poke resumes park"
 assert_eq "$(cat "$auth_dir/health")" '0 healthy' "poke healthy observation"
 
-config_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'config test' --terminal DONE --deadline +300)" || fail "config registration failed"
+config_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'config test' --terminal DONE --no-start-report --deadline +300)" || fail "config registration failed"
 config_id=$(printf '%s\n' "$config_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 config_dir="$PM_HOME/watches/$config_id"
 printf 'CONFIG\n' > "$SANDBOX/mode"
@@ -103,7 +103,7 @@ assert_eq "$(cat "$config_dir/state")" active "config poke resumes park"
 assert_eq "$(cat "$config_dir/health")" '0 healthy' "config poke healthy observation"
 # Network failures back off but never park.
 printf 'RUNNING\n' > "$SANDBOX/mode"
-network_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'network test' --terminal DONE --deadline +300)" || fail "network registration failed"
+network_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'network test' --terminal DONE --no-start-report --deadline +300)" || fail "network registration failed"
 network_id=$(printf '%s\n' "$network_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 printf 'NET\n' > "$SANDBOX/mode"
 network_dir="$PM_HOME/watches/$network_id"
@@ -121,7 +121,7 @@ network_now=$(date +%s)
 
 # Login/session environment loss skips without changing health or parking.
 printf 'RUNNING\n' > "$SANDBOX/mode"
-env_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'env test' --terminal DONE --deadline +300)" || fail "env registration failed"
+env_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'env test' --terminal DONE --no-start-report --deadline +300)" || fail "env registration failed"
 env_id=$(printf '%s\n' "$env_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 env_dir="$PM_HOME/watches/$env_id"
 printf 'ENV\n' > "$SANDBOX/mode"
@@ -132,7 +132,7 @@ assert_grep "$env_dir/log" 'PROBE-SKIP class=env-unavailable' "environment skip 
 
 # Terminal state remains available for recovery status, including the beacon.
 printf 'RUNNING\n' > "$SANDBOX/mode"
-terminal_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'retention test' --terminal DONE --deadline +300)" || fail "retention registration failed"
+terminal_reg="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'retention test' --terminal DONE --no-start-report --deadline +300)" || fail "retention registration failed"
 terminal_id=$(printf '%s\n' "$terminal_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 terminal_dir="$PM_HOME/watches/$terminal_id"
 printf 'DONE\n' > "$SANDBOX/mode"

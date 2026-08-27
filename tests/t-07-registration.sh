@@ -9,7 +9,7 @@ cat > "$SANDBOX/probe" <<'EOF'
 printf 'OLD snapshotted-detail\n'
 EOF
 chmod +x "$SANDBOX/probe"
-register_output="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'test snapshot' --terminal DONE --deadline +300)" || fail "script registration failed"
+register_output="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'test snapshot' --terminal DONE --no-start-report --deadline +300)" || fail "script registration failed"
 watch_id=$(printf '%s\n' "$register_output" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 [ -n "$watch_id" ] || fail "watch id missing"
 watch_dir="$PM_HOME/watches/$watch_id"
