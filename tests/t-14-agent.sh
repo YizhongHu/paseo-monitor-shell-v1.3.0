@@ -10,7 +10,7 @@ unset PM_SOURCE_ONLY
 cat > "$MOCK_DIR/inspect.json" <<'EOF'
 {"Status":"running","Archived":false,"PendingPermissions":[],"UpdatedAt":"2026-08-27T01:02:03Z"}
 EOF
-agent_reg="$($PMT_BIN watch --kind agent --agent agent-1 --report-on IDLE,BLOCKED-PERMISSION,CLOSED,ARCHIVED --dwell 2 --deadline +300)" || fail "agent registration failed"
+agent_reg="$($PMT_BIN watch --kind agent --agent agent-1 --report-on IDLE,BLOCKED-PERMISSION,CLOSED,ARCHIVED --deadline +300)" || fail "agent registration failed"
 agent_id=$(printf '%s\n' "$agent_reg" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 agent_dir="$PM_HOME/watches/$agent_id"
 assert_eq "$(cat "$agent_dir/last")" RUNNING "agent running token"

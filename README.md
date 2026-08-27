@@ -50,7 +50,7 @@ Kind floors and defaults:
 | `slurm` | 120s | 600s terminal-only, 300s transitions |
 | `pbs` | 120s | 600s terminal-only, 300s transitions |
 | `globus` | 60s | 300s |
-| `agent` | 60s | 60s |
+| `agent` | 60s | 60s; default dwell 2 |
 | `file-exists` | 60s local, 120s remote | 60s local, 120s remote |
 | `git-ref` | 60s | 120s |
 | `pr-merge` | 60s | 300s |
@@ -74,6 +74,8 @@ to them.
 Registration output states that delivery is best-effort. The caller owns its
 liveness backstop.
 
+Agent watches default to `--dwell 2`; the setting remains specific to this kind.
+
 ### Agent stall watch
 
 The `agent` kind watches stalls and observable lifecycle changes, not a
@@ -81,7 +83,7 @@ completion event:
 
 ```sh
 paseo-monitor watch --kind agent --agent <id> \
-  --report-on BLOCKED-PERMISSION,CLOSED,ARCHIVED --dwell 2
+  --report-to "$PASEO_AGENT_ID" --deadline +3600
 ```
 
 `paseo inspect <id> --json` exposes `Status`, `Archived`/`ArchivedAt`,

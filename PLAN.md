@@ -1532,7 +1532,8 @@ Remaining items are genuinely minor and settle during implementation:
   clone's `FETCH_HEAD` (free but stale).
 - Whether `--deadline` accepts relative forms (`+3d`) — friendlier to agents,
   ambiguous across sleep.
-- Exact `--dwell` default for the `agent` kind; needs one observation of real
-  `running`/`idle` flip frequency.
+- **`--dwell` default for the `agent` kind — settled by the 2026-08-27
+  observation:** a lane between turns produced a single `RUNNING`/`IDLE` flap;
+  default to `--dwell 2` for agent watches, while keeping dwell per-kind.
 - Whether `pr-merge` should also report `CLOSED` (unmerged) as terminal, or
   only `MERGED`.

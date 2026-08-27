@@ -36,7 +36,7 @@ Every watch requires `--deadline <when>`; malformed deadline values are rejected
 | `slurm` | Slurm job state | `--host <host> --job <id> [--report-transitions] [--report-on <tokens>] [--with-reason] --deadline <when>` | 120s | 600s terminal-only, 300s transitions | `paseo-monitor watch --kind slurm --host cannon --job 24211558 --deadline +3600` |
 | `pbs` | PBS job state | `--host <host> --job <id> [--report-transitions] [--report-on <tokens>] --deadline <when>` | 120s | 600s terminal-only, 300s transitions | `paseo-monitor watch --kind pbs --host polaris --job 123.server --deadline +3600` |
 | `globus` | Globus transfer status | `--task <id> --deadline <when>` | 60s | 300s | `paseo-monitor watch --kind globus --task TASK-ID --deadline +3600` |
-| `agent` | Paseo agent status | `--agent <id> [--report-on <tokens>] [--dwell <sweeps>] --deadline <when>` | 60s | 60s | `paseo-monitor watch --kind agent --agent AGENT-ID --report-on BLOCKED-PERMISSION,CLOSED,ARCHIVED --dwell 2 --deadline +3600` |
+| `agent` | Paseo agent status | `--agent <id> [--report-on <tokens>] [--dwell <sweeps>] --deadline <when>` (default dwell: 2) | 60s | 60s | `paseo-monitor watch --kind agent --agent AGENT-ID --report-on BLOCKED-PERMISSION,CLOSED,ARCHIVED --deadline +3600` |
 | `file-exists` | File existence | `--path <path> [--host <host>] --deadline <when>` | 60s local, 120s remote | 60s local, 120s remote | `paseo-monitor watch --kind file-exists --path /scratch/run/receipt --host polaris --deadline +3600` |
 | `git-ref` | Git ref SHA | `--remote <remote> --ref <ref> --deadline <when>` | 60s | 120s | `paseo-monitor watch --kind git-ref --remote ORIGIN --ref refs/heads/main --deadline +3600` |
 | `pr-merge` | Pull request merge state | `--repo <owner/repo> --pr <number> --deadline <when>` | 60s | 300s | `paseo-monitor watch --kind pr-merge --repo OWNER/REPO --pr 123 --deadline +3600` |
@@ -45,6 +45,8 @@ Every watch requires `--deadline <when>`; malformed deadline values are rejected
 `pr-merge` treats both `MERGED` and `CLOSED` as terminal. `CLOSED` is an
 observed unmerged human-gate decision, so leaving it active would poll forever
 until the deadline instead of reporting the gate outcome.
+
+Agent watches default to `--dwell 2`; the setting remains specific to this kind.
 
 Examples:
 

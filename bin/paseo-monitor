@@ -46,7 +46,7 @@ pm_kind_table() {
         'slurm | Slurm job state | --host <host> --job <id> [--report-transitions] [--report-on <tokens>] [--with-reason] --deadline <when> | floor=120 | default=600 terminal-only, 300 transitions' \
         'pbs | PBS job state | --host <host> --job <id> [--report-transitions] [--report-on <tokens>] --deadline <when> | floor=120 | default=600 terminal-only, 300 transitions' \
         'globus | Globus transfer status | --task <id> --deadline <when> | floor=60 | default=300' \
-        'agent | Paseo agent status | --agent <id> [--report-on <tokens>] [--dwell <sweeps>] --deadline <when> | floor=60 | default=60' \
+        'agent | Paseo agent status | --agent <id> [--report-on <tokens>] [--dwell <sweeps>] --deadline <when> | floor=60 | default=60, dwell=2' \
         'file-exists | File existence | --path <path> [--host <host>] --deadline <when> | floor=60 local, 120 remote | default=60 local, 120 remote' \
         'git-ref | Git ref SHA | --remote <remote> --ref <ref> --deadline <when> | floor=60 | default=120' \
         'pr-merge | Pull request merge state | --repo <owner/repo> --pr <number> --deadline <when> | floor=60 | default=300' \
@@ -1244,6 +1244,7 @@ pm_watch_main() {
     pwm_report_transitions=0
     pwm_with_reason=0
     pwm_dwell=0
+    pwm_dwell_set=0
     pwm_context=""
     pwm_labels=""
     pwm_harvested_labels=""
@@ -1274,7 +1275,7 @@ pm_watch_main() {
             --deadline) [ "$#" -ge 2 ] || { echo "paseo-monitor: --deadline is required" >&2; return 2; }; pwm_deadline="$2"; shift 2 ;;
             --terminal) [ "$#" -ge 2 ] || { echo "paseo-monitor: --terminal needs a value" >&2; return 2; }; pwm_terminal="$2"; pwm_terminal_set=1; shift 2 ;;
             --report-on) [ "$#" -ge 2 ] || { echo "paseo-monitor: --report-on needs a value" >&2; return 2; }; pwm_report_on="$2"; pwm_report_transitions=1; shift 2 ;;
-            --dwell) [ "$#" -ge 2 ] || { echo "paseo-monitor: --dwell needs a value" >&2; return 2; }; pwm_dwell="$2"; shift 2 ;;
+            --dwell) [ "$#" -ge 2 ] || { echo "paseo-monitor: --dwell needs a value" >&2; return 2; }; pwm_dwell="$2"; pwm_dwell_set=1; shift 2 ;;
             --report-transitions) pwm_report_transitions=1; shift ;;
             --context) [ "$#" -ge 2 ] || { echo "paseo-monitor: --context needs a value" >&2; return 2; }; pwm_context="$2"; shift 2 ;;
             --context-file) [ "$#" -ge 2 ] || { echo "paseo-monitor: --context-file needs a value" >&2; return 2; }; [ -f "$2" ] || { echo "paseo-monitor: context file not found: $2" >&2; return 2; }; pwm_context="$(cat "$2")"; shift 2 ;;
@@ -1325,6 +1326,9 @@ pm_watch_main() {
     if [ "$pwm_kind" = agent ] && [ -z "$pwm_report_on" ]; then
         pwm_report_on=BLOCKED-PERMISSION,CLOSED,ARCHIVED
         pwm_report_transitions=1
+    fi
+    if [ "$pwm_kind" = agent ] && [ "$pwm_dwell_set" -eq 0 ]; then
+        pwm_dwell=2
     fi
     if [ "$pwm_kind" = script ]; then
         [ -n "$pwm_reason" ] || { echo "paseo-monitor: --reason is mandatory with --script" >&2; return 2; }
