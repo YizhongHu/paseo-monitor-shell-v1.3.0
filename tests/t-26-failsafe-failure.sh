@@ -30,6 +30,11 @@ dir="$PM_HOME/watches/$id"
 [ -d "$dir" ] || fail "watch directory removed after failsafe failure"
 assert_eq "$(cat "$dir/state")" active "watch remains active after failsafe failure"
 assert_grep "$SANDBOX/register.err" 'paseo-monitor: WARN failsafe schedule not created (MISSING_PROVIDER); caller owns the liveness backstop' "failsafe warning"
+
+ordered_registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'failsafe ordering' --terminal DONE --no-start-report --failsafe --provider claude --deadline +300 2>&1)"
+ordered_registered_line="$(printf '%s\n' "$ordered_registration" | grep -n '^watch .* registered:' | cut -d: -f1)"
+ordered_warn_line="$(printf '%s\n' "$ordered_registration" | grep -n 'WARN failsafe schedule not created' | cut -d: -f1)"
+[ "$ordered_registered_line" -lt "$ordered_warn_line" ] || fail "registration line followed failsafe warning"
 ls_output="$($PMT_BIN ls)" || fail "ls failed after failsafe failure"
 printf '%s\n' "$ls_output" | grep -q "$id kind=script .* state=active" || fail "ls did not show surviving active watch"
 echo PASS: failsafe failure preserves active watch and warns

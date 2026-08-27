@@ -74,9 +74,8 @@ Subcommands:
       [--prohibit <text>] [--failsafe] [--max-fires <n>] \
       [--max-runs <n>] [--expires-in <duration>] [--no-start-report] \
       [--deliver paseo-queue|<command>]
-      Register a bundled probe.
   watch --script <file> --reason "<why no kind fits>" \
-      [--terminal TOK,TOK] [same common options as --kind]
+      --terminal TOK,TOK [same common options as --kind]
       Register a snapshotted custom probe.
   # --script requires --reason; probes are direct argv and never sh -c.
   kinds
@@ -1675,6 +1674,7 @@ labels=$pwm_labels"
     pm_atomic_write "$pwm_dir/detail" "$PM_PARSED_DETAIL" || { rm -rf "$pwm_dir"; return 1; }
     pwm_next="$(pm_next_due "$pwm_now" "$pwm_interval" "$pwm_id")"
     pm_atomic_write "$pwm_dir/nextDue" "$pwm_next" || { rm -rf "$pwm_dir"; return 1; }
+    printf 'watch %s registered: token=%s\n' "$pwm_id" "$PM_PARSED_TOKEN"
     if [ "$pwm_failsafe" -eq 1 ]; then
         if [ -z "$pwm_provider" ]; then
             pwm_provider="$(pm_discover_provider 2>/dev/null || printf '')"
@@ -1707,7 +1707,6 @@ labels=$pwm_labels"
     fi
     rm -f "$pwm_out" "$pwm_err"
     pwm_attempts=$(( (pwm_deadline_epoch - pwm_now + pwm_interval - 1) / pwm_interval ))
-    printf 'watch %s registered: token=%s\n' "$pwm_id" "$PM_PARSED_TOKEN"
     printf 'delivery is best-effort; caller owns the liveness backstop\n'
     if [ -f "$pwm_dir/failsafe" ]; then
         printf 'failsafe schedule=%s\n' "$(cat "$pwm_dir/failsafe")"
