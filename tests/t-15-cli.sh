@@ -62,7 +62,7 @@ pm_atomic_write "$old_dir/spec" "$(sed "s/^deadline=.*/deadline=$old_deadline/" 
 recent_id="$($PMT_BIN watch --script "$SANDBOX/probe" --reason recent --terminal DONE --deadline +300 | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')" || fail "recent watch registration failed"
 recent_dir="$PM_HOME/watches/$recent_id"
 pm_atomic_write "$recent_dir/state" terminal
-recent_deadline=$(( $(pm_now) - 2591999 ))
+recent_deadline=$(( $(pm_now) - 2591900 ))
 pm_atomic_write "$recent_dir/spec" "$(sed "s/^deadline=.*/deadline=$recent_deadline/" "$recent_dir/spec")"
 reap_out="$($PMT_BIN reap)"
 printf '%s\n' "$reap_out" > "$SANDBOX/reap"

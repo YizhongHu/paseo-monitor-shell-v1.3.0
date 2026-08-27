@@ -1112,7 +1112,7 @@ The caller is an unattended agent, and agents do not read warnings.
 | slurm, remote script | 120s | 300s | facility courtesy; smoke jobs still get ~2min discovery |
 | globus | 60s | 300s | hosted API built for polling; transfers are long |
 | git-ref | 60s | 120s | cheap, no facility policy; sweep granularity still binds |
-| agent, file, local script | 60s | 60–120s | local fork, cheap |
+| agent, file-exists, local script | 60s | 60–120s | local fork, cheap |
 
 Print `will probe ≤ deadline/interval times` at registration, so cost is
 visible to the registering agent. Jitter `nextDue` by a hash of the watch id
