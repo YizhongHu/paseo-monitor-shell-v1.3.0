@@ -23,6 +23,8 @@ EOF
 chmod +x "$SANDBOX/deliver"
 prohibit='never scancel job 42124320 and never resubmit it; this unconditional target constraint must survive envelope truncation'
 registration="$($PMT_BIN watch --script "$SANDBOX/probe" --reason 'HARVEST test' --terminal DONE --report-transitions --label extra=value --prohibit "$prohibit" --deliver "$SANDBOX/deliver" --deadline +300)" || fail "HARVEST registration failed"
+printf '%s\n' "$registration" > "$SANDBOX/registration.out"
+assert_grep "$SANDBOX/registration.out" 'paseo schedule create' "printed failsafe fallback"
 id=$(printf '%s\n' "$registration" | sed -n 's/^watch \([^ ]*\) registered.*/\1/p')
 dir="$PM_HOME/watches/$id"
 assert_grep "$dir/spec" 'labels=role=monitor|job=42124320|item=a1913cc1|lane=F2|extra=value' "harvested and explicit labels"

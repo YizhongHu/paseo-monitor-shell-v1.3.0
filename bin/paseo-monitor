@@ -1357,6 +1357,14 @@ labels=$pwm_labels"
     printf 'watch %s registered: token=%s\n' "$pwm_id" "$PM_PARSED_TOKEN"
     printf 'delivery is best-effort; caller owns the liveness backstop\n'
     printf 'will probe ≤ %s times before deadline (interval=%ss)\n' "$pwm_attempts" "$pwm_interval"
+    if [ -f "$pwm_dir/failsafe" ]; then
+        printf 'failsafe schedule=%s\n' "$(cat "$pwm_dir/failsafe")"
+    else
+        pwm_fallback_expires="$((pwm_deadline_epoch - pwm_now))s"
+        pwm_fallback_prompt="paseo-monitor status $pwm_id before anything else; then inspect paseo-monitor log $pwm_id. PROHIBITIONS: ${pwm_prohibit:-"(none)"}"
+        printf 'paseo schedule create %s --every %s --max-runs 1 --expires-in %s --json\n' \
+            "$(pm_remote_shell_quote "$pwm_fallback_prompt")" "$pwm_fallback_expires" "$pwm_fallback_expires"
+    fi
 }
  
 pm_kinds() {
