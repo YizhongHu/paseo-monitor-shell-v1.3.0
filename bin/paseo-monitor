@@ -575,6 +575,10 @@ pm_run_registered_probe() {
             fi
             pm_run_remote_probe "$prp_out" "$prp_err" "$prp_host" \
                 sacct -X -j "$prp_job" --parsable2 --noheader --format=State
+            prp_rc=$?
+            [ "$prp_rc" -eq 0 ] || return "$prp_rc"
+            pm_slurm_probe_output "$prp_dir" "$prp_out"
+            return 0
             ;;
         globus)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" \
@@ -745,6 +749,7 @@ pm_should_report_transition() {
 
     psr_report_on="$(pm_spec_value report_on "$psr_dir/spec")"
     pm_terminal_token "$psr_token" "$psr_terminal" && return 0
+    case "$psr_token" in UNKNOWN|VANISHED) return 0 ;; esac
     [ "$psr_transitions" = 1 ] || return 1
     [ -z "$psr_report_on" ] && return 0
     pm_match_csv "$psr_token" "$psr_report_on"
@@ -966,6 +971,7 @@ pm_watch_main() {
     pwm_terminal_set=0
     pwm_report_on=""
     pwm_report_transitions=0
+    pwm_with_reason=0
     pwm_dwell=0
     pwm_context=""
     pwm_labels=""
@@ -1013,6 +1019,9 @@ pm_watch_main() {
             --with-reason) pwm_with_reason=1; shift ;;
             *) echo "paseo-monitor: unknown watch option: $1" >&2; return 2 ;;
         esac
+    case "$pwm_report_on" in
+        *:*) pwm_with_reason=1 ;;
+    esac
     done
     if [ -n "$pwm_script" ] && [ -n "$pwm_kind" ]; then
         echo "paseo-monitor: choose --kind or --script, not both" >&2
@@ -1065,6 +1074,7 @@ deadline=$pwm_deadline_epoch
 registered=$pwm_now
 terminal=$pwm_terminal
 report_on=$pwm_report_on
+with_reason=$pwm_with_reason
 report_transitions=$pwm_report_transitions
 dwell=$pwm_dwell
 prohibit=$pwm_prohibit
