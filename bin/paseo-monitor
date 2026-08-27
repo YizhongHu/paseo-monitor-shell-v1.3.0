@@ -1,0 +1,102 @@
+#!/bin/sh
+# paseo-monitor: stateless launchd-driven watcher for long-running work.
+# POSIX sh only; see AGENTS.md for the portability and disposability contract.
+set -u
+
+# External knobs are read exactly once here. Runtime code uses PM_* only.
+PM_HOME="${PASEO_MONITOR_HOME:-$HOME/.paseo-monitor}"
+PM_LOG_MAX_BYTES="${PASEO_MONITOR_LOG_MAX_BYTES:-5242880}"
+PM_LOCK_GRACE_SECONDS="${PASEO_MONITOR_LOCK_GRACE_SECONDS:-5}"
+PM_BACKOFF_SCALE="${PASEO_MONITOR_BACKOFF_SCALE:-1}"
+PM_FAST_SWEEP="${PASEO_MONITOR_FAST_SWEEP:-0}"
+
+LC_ALL=C
+export LC_ALL
+umask 077
+
+usage() {
+    cat <<'EOF'
+Usage: paseo-monitor <subcommand> [args]
+
+A cheap, stateless watcher. One launchd-driven sweep observes due watches and
+reports state changes; it does not own a liveness guarantee.
+
+Subcommands:
+  watch --kind <kind> [kind args] [options]
+      Register a watch. Supported kinds and registration options are defined
+      in PLAN.md; implementation is not available yet.
+  watch --script <file> --reason "<why no kind fits>" [options]
+      Register a snapshotted custom probe; implementation is not available yet.
+  kinds
+      Print the bundled kind table; implementation is not available yet.
+  ls
+      List watches; implementation is not available yet.
+  status [<id>]
+      Show watch status and recovery fields; implementation is not available yet.
+  log <id> [-n N] [-f]
+      Show a watch log; implementation is not available yet.
+  poke <id>
+      Probe now, out of band; implementation is not available yet.
+  rm <id> | --all
+      Remove one watch or all watches; implementation is not available yet.
+  reap
+      Drop long-expired watches; implementation is not available yet.
+  _sweep
+      Run one stateless sweep; used by launchd, implementation is not available yet.
+  help | --help | -h
+      Show this help message.
+
+State layout (under PASEO_MONITOR_HOME, default ~/.paseo-monitor):
+  sweep.lock/                   global mkdir lock, with lock/pid inside
+  sweep.log                     sweeper events, rotated
+  watches/<watch-id>/           one directory per watch
+    spec                         kind, params, report-to, cadence and policy
+    context                      --context body
+    probe                        snapshotted --script probe
+    last                         last observed token
+    detail                       last detail line
+    nextDue                      epoch seconds
+    health                       consecutive failure count and class
+    state                        active | parked | terminal | expired | delivery-failed
+    undelivered                  report recorded but enqueue not confirmed
+    fires                        delivered report count
+    log                          per-watch event log, rotated
+
+Environment knobs (read once into internal PM_* variables):
+  PASEO_MONITOR_HOME             State root (default: $HOME/.paseo-monitor)
+  PASEO_MONITOR_LOG_MAX_BYTES    Rotate logs at this size (default: 5242880)
+  PASEO_MONITOR_LOCK_GRACE_SECONDS
+                                  Lock-without-pid grace window (default: 5)
+  PASEO_MONITOR_BACKOFF_SCALE    Test-only backoff multiplier (default: 1)
+  PASEO_MONITOR_FAST_SWEEP       Test-only fast-sweep mode (default: 0)
+
+The external names above are never read below startup. Probes inherit the
+calling environment deliberately; credentials such as SSH_AUTH_SOCK matter.
+EOF
+}
+
+pm_init_state() {
+    mkdir -p "$PM_HOME/watches" || {
+        printf 'paseo-monitor: cannot create state root: %s\n' "$PM_HOME" >&2
+        return 1
+    }
+}
+
+not_implemented() {
+    printf 'paseo-monitor: %s: not implemented yet\n' "$1" >&2
+    return 1
+}
+
+case "${1:-help}" in
+    help|--help|-h)
+        usage
+        ;;
+    watch|kinds|ls|status|log|poke|rm|reap|_sweep)
+        not_implemented "$1"
+        ;;
+    *)
+        printf 'paseo-monitor: unknown subcommand: %s\n' "$1" >&2
+        printf 'Try paseo-monitor --help.\n' >&2
+        exit 2
+        ;;
+esac
