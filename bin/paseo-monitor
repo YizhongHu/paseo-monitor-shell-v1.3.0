@@ -913,6 +913,19 @@ pm_harvest_labels() {
     printf '%s\n' "$phl_labels"
 }
 
+pm_paseo_bin() {
+    # pm_paseo_bin <watch-dir> -- absolute `paseo`, snapshotted like every other
+    # helper. The sweeper's PATH is not the caller's, so a bare name here fails
+    # rc=127 under launchd exactly as the agent probe once did.
+    ppb_dir="$1"
+    PM_PASEO_BIN="$(pm_spec_value paseo_bin "$ppb_dir/spec" 2>/dev/null || printf '')"
+    [ -n "$PM_PASEO_BIN" ] && return 0
+    pm_resolve_binary paseo 2>/dev/null || return 1
+    PM_PASEO_BIN="$PM_RESOLVED_BINARY"
+    pm_spec_backfill "$ppb_dir" paseo_bin "$PM_PASEO_BIN" || :
+    return 0
+}
+
 pm_schedule_create() {
     # pm_schedule_create <watch-dir> <every> <max-runs> <expires-in> <prompt>.
     psc_dir="$1"
@@ -922,8 +935,12 @@ pm_schedule_create() {
     psc_prompt="$5"
     psc_out="$psc_dir/.failsafe.stdout"
     psc_err="$psc_dir/.failsafe.stderr"
+    pm_paseo_bin "$psc_dir" || {
+        printf 'paseo-monitor: required helper not found: paseo (--failsafe)\n' >&2
+        return 127
+    }
     pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$psc_out" "$psc_err" \
-        paseo schedule create "$psc_prompt" --every "$psc_every" \
+        "$PM_PASEO_BIN" schedule create "$psc_prompt" --every "$psc_every" \
         --max-runs "$psc_max_runs" --expires-in "$psc_expires" --json
     psc_rc=$?
     if [ "$psc_rc" -ne 0 ]; then
@@ -948,7 +965,11 @@ pm_clear_failsafe() {
     [ -f "$pcf_dir/failsafe" ] || return 0
     pcf_id="$(cat "$pcf_dir/failsafe" 2>/dev/null || printf '')"
     [ -n "$pcf_id" ] || return 0
-    if paseo schedule delete "$pcf_id" >/dev/null 2>&1; then
+    pm_paseo_bin "$pcf_dir" || {
+        log_line "$pcf_dir" FAILSAFE-DELETE-FAILED "schedule=$pcf_id paseo not resolvable" || :
+        return 0
+    }
+    if "$PM_PASEO_BIN" schedule delete "$pcf_id" >/dev/null 2>&1; then
         rm -f "$pcf_dir/failsafe"
         log_line "$pcf_dir" FAILSAFE-DELETED "schedule=$pcf_id" || :
     else
@@ -1668,6 +1689,30 @@ pm_log() {
     fi
 }
 
+pm_teardown_watch() {
+    # pm_teardown_watch <dir> -- release a watch's outside-world claims before
+    # the directory goes away. Reports the cancellation ONLY when the watch
+    # still owed one: a watch that already fired, or that legitimately went
+    # quiet at terminal/expiry, has nothing further to say and reporting it
+    # would be noise. A watch removed while still active and never having
+    # fired leaves a caller waiting forever, which is the gap worth closing.
+    ptw_dir="$1"
+    ptw_state="$(cat "$ptw_dir/state" 2>/dev/null || printf 'active')"
+    ptw_fires="$(cat "$ptw_dir/fires" 2>/dev/null || printf '0')"
+    pm_valid_uint "$ptw_fires" || ptw_fires=0
+    pm_clear_failsafe "$ptw_dir" || :
+    case "$ptw_state" in terminal|expired) return 0 ;; esac
+    [ "$ptw_fires" -eq 0 ] || return 0
+    ptw_last="$(cat "$ptw_dir/last" 2>/dev/null || printf 'UNOBSERVED')"
+    pm_report_event "$ptw_dir" cancelled "$ptw_last" CANCELLED \
+        "watch removed before it reported; last observation $ptw_last" || {
+        printf 'paseo-monitor: WARN cancellation report undelivered for %s\n' \
+            "$(basename "$ptw_dir")" >&2
+        [ -f "$ptw_dir/undelivered" ] && cat "$ptw_dir/undelivered" >&2
+    }
+    return 0
+}
+
 pm_rm() {
     [ "$#" -eq 1 ] || {
         printf 'paseo-monitor: rm needs <id> or --all\n' >&2
@@ -1680,6 +1725,7 @@ pm_rm() {
         trap 'release_lock "$PM_HOME"' 0 1 2 3 15
         for prm_dir in "$PM_HOME"/watches/*; do
             [ -d "$prm_dir" ] || continue
+            pm_teardown_watch "$prm_dir"
             rm -rf "$prm_dir"
             prm_count=$((prm_count + 1))
         done
@@ -1698,6 +1744,7 @@ pm_rm() {
     }
     acquire_lock "$PM_HOME" || return 1
     trap 'release_lock "$PM_HOME"' 0 1 2 3 15
+    pm_teardown_watch "$prm_dir"
     rm -rf "$prm_dir"
     printf 'removed watch %s\n' "$prm_id"
 }
@@ -1717,6 +1764,7 @@ pm_reap() {
         pm_valid_uint "$preap_deadline" || continue
         [ "$preap_now" -ge "$preap_deadline" ] || continue
         [ "$((preap_now - preap_deadline))" -ge "$preap_retention" ] || continue
+        pm_clear_failsafe "$preap_dir" || :
         rm -rf "$preap_dir"
         preap_count=$((preap_count + 1))
     done
