@@ -1254,7 +1254,12 @@ pm_status() {
         return 2
     }
     if [ "$#" -gt 0 ]; then
-        pms_dir="$PM_HOME/watches/$1"
+        pms_id="$1"
+        pm_validate_watch_id "$pms_id" || {
+            printf 'paseo-monitor: invalid watch id: %s\n' "$pms_id" >&2
+            return 2
+        }
+        pms_dir="$PM_HOME/watches/$pms_id"
         [ -f "$pms_dir/spec" ] || {
             printf 'paseo-monitor: watch not found: %s\n' "$1" >&2
             return 1
