@@ -822,24 +822,30 @@ pm_deliver() {
     pmd_backend="$(pm_spec_value deliver "$pmd_dir/spec")"
     [ -n "$pmd_backend" ] || return 0
     pmd_mode="$(pm_spec_value deliver_mode "$pmd_dir/spec")"
+    pmd_err="$pmd_dir/.delivery.stderr"
+    rm -f "$pmd_err"
     if [ "$pmd_mode" = queue ] || [ "$pmd_backend" = paseo-queue ]; then
         pmd_agent="$(pm_spec_value report_to "$pmd_dir/spec")"
         if [ -z "$pmd_agent" ]; then
             printf 'paseo-monitor: WARN delivery-failed watch=%s backend=%s\n' \
                 "$(basename "$pmd_dir")" "$pmd_backend" >&2
+            printf 'delivery backend requires report_to\n' > "$pmd_err"
             return 1
         fi
-        printf '%s\n' "$pmd_report" | "$pmd_backend" add "$pmd_agent"
+        printf '%s\n' "$pmd_report" | "$pmd_backend" add "$pmd_agent" 2>"$pmd_err"
         pmd_rc=$?
     else
-        printf '%s\n' "$pmd_report" | "$pmd_backend"
+        printf '%s\n' "$pmd_report" | "$pmd_backend" 2>"$pmd_err"
         pmd_rc=$?
     fi
     if [ "$pmd_rc" -ne 0 ]; then
+        pmd_err_text="$(dd bs=1 count=8192 < "$pmd_err" 2>/dev/null || printf '')"
+        printf '%s' "$pmd_err_text" > "$pmd_err"
         printf 'paseo-monitor: WARN delivery-failed watch=%s backend=%s rc=%s\n' \
             "$(basename "$pmd_dir")" "$pmd_backend" "$pmd_rc" >&2
         return "$pmd_rc"
     fi
+    rm -f "$pmd_err"
     return 0
 }
 
@@ -973,6 +979,8 @@ pm_report_event() {
         rm -f "$pre_dir/undelivered"
         return 0
     fi
+    pre_delivery_err="$(cat "$pre_dir/.delivery.stderr" 2>/dev/null || printf '')"
+    log_line "$pre_dir" DELIVERY-FAILED "$pre_delivery_err" || :
     pm_atomic_write "$pre_dir/undelivered" "$pre_report" || :
     set_state "$pre_dir" delivery-failed || :
     return 1
@@ -1053,7 +1061,8 @@ pm_sweep_watch() {
                 log_line "$psw_dir" DELIVERY-RETRY "$(printf '%s' "$psw_pending" | cut -c1-256)" || :
                 psw_state="$(cat "$psw_dir/state" 2>/dev/null || printf 'active')"
             else
-                log_line "$psw_dir" DELIVERY-RETRY-FAILED || :
+                psw_delivery_err="$(cat "$psw_dir/.delivery.stderr" 2>/dev/null || printf '')"
+                log_line "$psw_dir" DELIVERY-RETRY-FAILED "$psw_delivery_err" || :
                 return 0
             fi
     fi

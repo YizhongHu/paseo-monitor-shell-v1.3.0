@@ -3,6 +3,8 @@
 setup
 trap teardown EXIT
 source_monitor
+PASEO_MONITOR_LOG_MAX_BYTES=100000
+export PASEO_MONITOR_LOG_MAX_BYTES
 unset PM_SOURCE_ONLY
 
 cat > "$SANDBOX/mode" <<'EOF'
@@ -53,7 +55,8 @@ count=0
 count=\$((count + 1))
 printf '%s\\n' "\$count" > '$SANDBOX/fail-count'
 cat > '$SANDBOX/retry-report'
-[ "\$count" -eq 1 ] && exit 9
+printf 'delivery backend exploded\n' >&2
+[ "\$count" -le 2 ] && exit 9
 exit 0
 EOF
 chmod +x "$SANDBOX/failing-deliver"
@@ -66,6 +69,9 @@ $PMT_BIN _sweep >/dev/null 2>"$SANDBOX/fail.err" || true
 assert_eq "$(cat "$retry_dir/state")" delivery-failed "failed delivery state"
 [ -f "$retry_dir/undelivered" ] || fail "failed delivery missing undelivered flag"
 assert_grep "$SANDBOX/fail.err" 'WARN delivery-failed' "delivery warning"
+$PMT_BIN _sweep >/dev/null 2>"$SANDBOX/retry.err" || true
+assert_grep "$retry_dir/log" 'DELIVERY-FAILED .*delivery backend exploded' "delivery stderr on initial failure"
+assert_grep "$retry_dir/log" 'DELIVERY-RETRY-FAILED .*delivery backend exploded' "delivery stderr on retry failure"
 $PMT_BIN _sweep || fail "delivery retry sweep failed"
 assert_eq "$(cat "$retry_dir/fires")" 1 "retry counts delivery"
 [ ! -e "$retry_dir/undelivered" ] || fail "retry left undelivered flag"
