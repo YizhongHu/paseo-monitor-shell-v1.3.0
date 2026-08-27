@@ -570,15 +570,34 @@ pm_slurm_probe_output() {
 }
 
 pm_pbs_probe_output() {
-    # pm_pbs_probe_output <watch-dir> <stdout> -- map qstat -f artifacts.
+    # pm_pbs_probe_output <watch-dir> <stdout> -- map qstat live/history artifacts.
     pppo_dir="$1"
     pppo_out="$2"
-    pppo_state="$(sed -n 's/^[[:space:]]*job_state[[:space:]]*=[[:space:]]*//p' "$pppo_out" | sed -n '1p')"
+    pppo_live="$pppo_out"
+    pppo_history=""
+    if grep -q '^PASEO_MONITOR_PBS_HISTORICAL$' "$pppo_out"; then
+        pppo_live="$pppo_out.live.$$"
+        pppo_history="$pppo_out.history.$$"
+        sed '/^PASEO_MONITOR_PBS_HISTORICAL$/,$d' "$pppo_out" > "$pppo_live"
+        sed -n '/^PASEO_MONITOR_PBS_HISTORICAL$/,$p' "$pppo_out" | sed '1d' > "$pppo_history"
+    fi
+    pppo_state="$(sed -n 's/^[[:space:]]*job_state[[:space:]]*=[[:space:]]*//p' "$pppo_live" | sed -n '1p')"
+    pppo_source=qstat
+    pppo_record="$pppo_live"
+    if [ -z "$pppo_state" ] && [ -n "$pppo_history" ]; then
+        pppo_state="$(sed -n 's/^[[:space:]]*job_state[[:space:]]*=[[:space:]]*//p' "$pppo_history" | sed -n '1p')"
+        pppo_source=qstat-x
+        pppo_record="$pppo_history"
+    fi
     pppo_state="${pppo_state%% *}"
     pppo_state="$(printf '%s\n' "$pppo_state" | tr 'a-z' 'A-Z')"
-    [ -n "$pppo_state" ] || return 1
-    pppo_raw="$(tr '\n' ' ' < "$pppo_out" | cut -c1-384)"
-    printf '%s qstat=%s\n' "$pppo_state" "$pppo_raw" > "$pppo_out"
+    if [ -n "$pppo_state" ]; then
+        pppo_raw="$(tr '\n' ' ' < "$pppo_record" | cut -c1-384)"
+        printf '%s %s=%s\n' "$pppo_state" "$pppo_source" "$pppo_raw" > "$pppo_out"
+    else
+        printf 'UNKNOWN qstat live and historical lookup empty\n' > "$pppo_out"
+    fi
+    [ "$pppo_live" = "$pppo_out" ] || rm -f "$pppo_live" "$pppo_history"
 }
 pm_git_ref_probe_output() {
     # pm_git_ref_probe_output <watch-dir> <stdout> -- extract the observed SHA.
@@ -761,8 +780,10 @@ pm_run_registered_probe() {
             return 0
             ;;
         pbs)
+            prp_job_q="$(pm_remote_shell_quote "$prp_job")"
+            prp_pbs_cmd="qstat -f $prp_job_q || { printf '\\nPASEO_MONITOR_PBS_HISTORICAL\\n'; qstat -x $prp_job_q; :; }"
             pm_run_remote_probe "$prp_out" "$prp_err" "$prp_host" \
-                qstat -f "$prp_job"
+                "$prp_pbs_cmd"
             prp_rc=$?
             [ "$prp_rc" -eq 0 ] || return "$prp_rc"
             pm_pbs_probe_output "$prp_dir" "$prp_out"
