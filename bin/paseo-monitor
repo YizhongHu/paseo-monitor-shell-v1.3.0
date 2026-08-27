@@ -1683,6 +1683,9 @@ pm_status_one() {
     pso_last="$(cat "$pso_dir/last" 2>/dev/null || printf '(none)')"
     pso_transition="$(cat "$pso_dir/lastTransition" 2>/dev/null || printf '(none)')"
     pso_fires="$(cat "$pso_dir/fires" 2>/dev/null || printf '0')"
+    pso_delivery_error="$(pm_report_value "$(cat "$pso_dir/.delivery.stderr" 2>/dev/null || printf '')" 256)"
+    [ -n "$pso_delivery_error" ] || pso_delivery_error="(none)"
+    pso_sweeper_log="$PM_HOME/sweep.log"
     if [ -f "$pso_dir/undelivered" ]; then
         pso_undelivered=yes
     else
@@ -1705,9 +1708,9 @@ pm_status_one() {
         "$(pm_watch_owner "$pso_dir")" "$(pm_spec_value report_to "$pso_dir/spec")" \
         "$([ -n "${PASEO_AGENT_ID:-}" ] && [ "$(pm_spec_value owner "$pso_dir/spec")" = "$PASEO_AGENT_ID" ] && printf yes || printf no)" \
         "$pso_health"
-    printf 'last_token=%s last_transition=%s delivery_attempted=%s undelivered=%s fires=%s deadline=%s log=%s\n' \
-        "$pso_last" "$pso_transition" "$pso_attempted" "$pso_undelivered" "$pso_fires" \
-        "$(pm_spec_value deadline "$pso_dir/spec")" "$PM_HOME/watches/$pso_id/log"
+    printf 'last_token=%s last_transition=%s delivery_attempted=%s undelivered=%s delivery_error=%s fires=%s deadline=%s log=%s sweeper_log=%s\n' \
+        "$pso_last" "$pso_transition" "$pso_attempted" "$pso_undelivered" "$pso_delivery_error" "$pso_fires" \
+        "$(pm_spec_value deadline "$pso_dir/spec")" "$PM_HOME/watches/$pso_id/log" "$pso_sweeper_log"
 }
 
 pm_status() {

@@ -70,6 +70,11 @@ poke_out="$($PMT_BIN poke "$watch_id")" || fail "poke failed"
 assert_eq "$(cat "$watch_dir/state")" active "poke resumes parked watch"
 assert_grep "$watch_dir/log" 'POKE resumed parked watch' "poke park resume"
 pm_atomic_write "$watch_dir/state" delivery-failed
+pm_atomic_write "$watch_dir/.delivery.stderr" 'delivery backend exploded rc=9'
+pm_atomic_write "$watch_dir/undelivered" 'pending report'
+$PMT_BIN status "$watch_id" > "$SANDBOX/delivery-status.out" 2> "$SANDBOX/delivery-status.err"
+assert_grep "$SANDBOX/delivery-status.out" 'undelivered=yes.*delivery_error=delivery backend exploded rc=9' "status delivery error"
+assert_grep "$SANDBOX/delivery-status.out" "sweeper_log=$PM_HOME/sweep.log" "status sweeper log pointer"
 pm_atomic_write "$watch_dir/health" '1 network'
 $PMT_BIN status "$watch_id" > "$SANDBOX/warn.out" 2> "$SANDBOX/warn.err"
 assert_grep "$SANDBOX/warn.err" 'WARN watch=' "status warning stream"
