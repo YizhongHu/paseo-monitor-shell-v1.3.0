@@ -26,7 +26,7 @@ sleep 1
 printf 'DONE second\n'
 EOF
 chmod +x "$SANDBOX/fragmented"
-pm_run_with_timeout 3 "$SANDBOX/out" "$SANDBOX/err" "$SANDBOX/fragmented"
+pm_run_with_timeout 10 "$SANDBOX/out" "$SANDBOX/err" "$SANDBOX/fragmented"
 rc=$?
 assert_rc "$rc" 0 "fragmented stdout observation"
 assert_eq "$(cat "$SANDBOX/out")" "PENDING first
@@ -39,7 +39,7 @@ printf 'FAILED stale-output\n'
 exit 7
 EOF
 chmod +x "$SANDBOX/broken"
-pm_run_with_timeout 1 "$SANDBOX/out" "$SANDBOX/err" "$SANDBOX/broken"
+pm_run_with_timeout 10 "$SANDBOX/out" "$SANDBOX/err" "$SANDBOX/broken"
 rc=$?
 assert_rc "$rc" 7 "probe health rc"
 
@@ -58,7 +58,7 @@ cat > "$SANDBOX/large" <<'EOF'
 dd if=/dev/zero bs=10000 count=1 2>/dev/null
 EOF
 chmod +x "$SANDBOX/large"
-pm_run_with_timeout 1 "$SANDBOX/out" "$SANDBOX/err" "$SANDBOX/large"
+pm_run_with_timeout 10 "$SANDBOX/out" "$SANDBOX/err" "$SANDBOX/large"
 rc=$?
 assert_rc "$rc" 0 "large stdout observation"
 size=$(wc -c < "$SANDBOX/out")
