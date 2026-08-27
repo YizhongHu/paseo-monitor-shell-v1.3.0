@@ -93,4 +93,18 @@ pm_atomic_write "$vanish_dir/nextDue" 0
 $PMT_BIN _sweep || fail "vanished sweep failed"
 assert_eq "$(cat "$vanish_dir/last")" VANISHED "vanished token"
 assert_grep "$vanish_dir/log" 'new=VANISHED' "vanished report"
+# Concurrent consumers must each receive one scripted response.
+mock_ssh_script "0${tab}LOCK-A" "0${tab}LOCK-B" "0${tab}LOCK-C" "0${tab}LOCK-D"
+ssh cannon lock-a > "$SANDBOX/ssh-a" &
+ssh cannon lock-b > "$SANDBOX/ssh-b" &
+ssh cannon lock-c > "$SANDBOX/ssh-c" &
+ssh cannon lock-d > "$SANDBOX/ssh-d" &
+wait
+cat "$SANDBOX"/ssh-? | sort > "$SANDBOX/ssh-all"
+assert_eq "$(cat "$SANDBOX/ssh-all" | sort)" "LOCK-A
+LOCK-B
+LOCK-C
+LOCK-D" "concurrent scripted SSH responses"
+assert_eq "$(wc -l < "$MOCK_DIR/ssh.script" | tr -d ' ')" 0 "concurrent script fully consumed"
+
 echo PASS: Slurm accounting, terminal, anomaly, reason, and SSH-round-trip behavior

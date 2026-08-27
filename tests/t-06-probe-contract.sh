@@ -19,6 +19,19 @@ rc=$?
 assert_rc "$rc" 0 "target FAILED is healthy observation"
 pm_parse_probe_output "$SANDBOX/out" || fail "valid probe output rejected"
 assert_eq "$PM_PARSED_TOKEN" FAILED "target token"
+cat > "$SANDBOX/fragmented" <<'EOF'
+#!/bin/sh
+printf 'PENDING first\n'
+sleep 1
+printf 'DONE second\n'
+EOF
+chmod +x "$SANDBOX/fragmented"
+pm_run_with_timeout 3 "$SANDBOX/out" "$SANDBOX/err" "$SANDBOX/fragmented"
+rc=$?
+assert_rc "$rc" 0 "fragmented stdout observation"
+assert_eq "$(cat "$SANDBOX/out")" "PENDING first
+DONE second" "fragmented stdout preserved"
+
 
 cat > "$SANDBOX/broken" <<'EOF'
 #!/bin/sh

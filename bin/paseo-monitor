@@ -416,12 +416,12 @@ pm_run_with_timeout() {
     rm -f "$pmt_out_pipe" "$pmt_err_pipe" "$pmt_timeout_marker"
     mkfifo "$pmt_out_pipe" "$pmt_err_pipe" || return 2
     (
-        dd bs=4096 count=1 2>/dev/null
+        dd bs=1 count=4096 2>/dev/null
         cat >/dev/null
     ) <"$pmt_out_pipe" >"$pmt_out" &
     pmt_out_cap=$!
     (
-        dd bs=8192 count=1 2>/dev/null
+        dd bs=1 count=8192 2>/dev/null
         cat >/dev/null
     ) <"$pmt_err_pipe" >"$pmt_err" &
     pmt_err_cap=$!

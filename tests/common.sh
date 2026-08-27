@@ -68,6 +68,8 @@ json_agents() {
 }
 
 mock_ssh_script() {
+    while ! mkdir "$MOCK_DIR/ssh.lock" 2>/dev/null; do sleep 1; done
     : > "$MOCK_DIR/ssh.script"
     for pmts_line in "$@"; do printf '%s\n' "$pmts_line" >> "$MOCK_DIR/ssh.script"; done
+    rmdir "$MOCK_DIR/ssh.lock"
 }
