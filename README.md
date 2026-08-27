@@ -64,8 +64,8 @@ file; that workaround observes the artifact rather than inventing a verdict.
 
 Default state is `~/.paseo-monitor`. The state root contains `sweep.lock/`,
 `sweep.log`, `sweep.beacon`, and `watches/<watch-id>/` directories. A watch
-directory contains `spec`, `context`, `probe`, `last`, `detail`, `nextDue`,
-`health`, `state`, `undelivered`, `fires`, and `log` as applicable. The global
+directory contains `spec`, `context`, `probe`, `last`, `detail`, `dwell`,
+`nextDue`, `health`, `state`, `undelivered`, `fires`, and `log` as applicable.
 lock is mkdir-based and all mutable files use atomic temporary-file plus `mv`
 writes.
 
