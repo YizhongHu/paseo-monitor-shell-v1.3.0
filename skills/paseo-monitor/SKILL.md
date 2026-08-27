@@ -76,6 +76,9 @@ Orchestrator item id; exact full SHA and branch; why or purpose; who owns the
 next action; one evidence line citing an artifact; and prohibitions. `branch`
 and `sha` are recommended label keys for `--label`, never CLI flags.
 
+Other common watch options are `--max-fires N` and `--deliver
+paseo-queue|COMMAND`; the complete syntax is shown by `paseo-monitor --help`.
+
 ### Labels, prohibitions, and failsafe
 
 At registration the tool harvests `role`, `job`, `item`, and `lane` from the
