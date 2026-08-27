@@ -81,19 +81,20 @@ Subcommands:
   kinds
       Print the bundled kind table.
   ls
-      List watches: kind, target, state, nextDue, reason.
+      List live watches: kind, target, state, owner, report_to, nextDue, reason.
   status [<id>]
-      Show watch status and recovery fields.
+      Show watch status and recovery fields, including owner and report_to.
   log <id> [-n N] [-f]
-      Show a watch log.
+      Show a watch log, including a removed watch retained in the graveyard.
   poke <id>
       Probe now, out of band; also resumes a parked watch.
-  rm <id> | --all
-      Remove one watch or all watches.
+  rm <id> | --all | --all-agents
+      Remove one watch, all of the caller's watches, or every watch.
+      --all-agents lists every watch and owner before global removal.
   # rm reports owed active cancellations; reap remains silent.
   # --max-fires reports one exhausted event at the cap and keeps observing.
   reap
-      Drop watches expired beyond the retention period.
+      Drop watches and graveyard entries expired beyond the retention period.
   _sweep
       Run one stateless sweep; used by launchd.
   help | --help | -h
@@ -104,18 +105,12 @@ Subcommands:
 State layout (under PASEO_MONITOR_HOME, default ~/.paseo-monitor):
   sweep.lock/                   global mkdir lock, with lock/pid inside
   sweep.log                     sweeper events, rotated
-  watches/<watch-id>/           one directory per watch
-    spec                        kind, params, report-to, cadence and policy
-    context                      --context body
-    probe                       snapshotted --script probe
-    last                        last observed token
-    detail                      last detail line
-    nextDue                     epoch seconds (jittered)
-    health                      consecutive failure count and class
-    state                       active | parked | terminal | expired | delivery-failed
-    undelivered                  report recorded but enqueue not confirmed
-    fires                        delivered report count
-    log                         per-watch event log, rotated
+  watches/<watch-id>/            one directory per live watch
+  graveyard/<watch-id>/          removed spec, context, log, and retention data
+  # The watches/<watch-id> compatibility link keeps old report citations valid.
+  # Each live watch contains:
+  #   spec, context, probe, last, detail, nextDue, health, state, undelivered,
+  #   fires, log
 
 Environment knobs (read once into internal PM_* variables):
   PASEO_MONITOR_HOME             State root (default: $HOME/.paseo-monitor)
@@ -356,16 +351,45 @@ release_lock() {
 }
 
 pm_init_state() {
-    mkdir -p "$PM_HOME/watches" || {
+    mkdir -p "$PM_HOME/watches" "$PM_HOME/graveyard" || {
         printf 'paseo-monitor: cannot create state root: %s\n' "$PM_HOME" >&2
         return 1
     }
 }
- 
+
+pm_is_graveyard() {
+    [ -f "$1/graveyard" ]
+}
+
+pm_watch_owner() {
+    pwo_dir="$1"
+    pwo_owner="$(pm_spec_value owner "$pwo_dir/spec" 2>/dev/null || printf '')"
+    [ -n "$pwo_owner" ] && printf '%s\n' "$pwo_owner" || printf '(unrecorded)\n'
+}
+
+pm_watch_source() {
+    # pm_watch_source <id> -- print live or graveyard directory.
+    pws_id="$1"
+    pws_live="$PM_HOME/watches/$pws_id"
+    if [ -f "$pws_live/graveyard" ]; then
+        printf '%s\n' "$PM_HOME/graveyard/$pws_id"
+    elif [ -f "$pws_live/spec" ]; then
+        printf '%s\n' "$pws_live"
+    elif [ -f "$PM_HOME/graveyard/$pws_id/spec" ]; then
+        printf '%s\n' "$PM_HOME/graveyard/$pws_id"
+    else
+        return 1
+    fi
+}
+
+pm_watch_owner_key() {
+    pwok_dir="$1"
+    printf '%s\n' "$(pm_spec_value owner "$pwok_dir/spec" 2>/dev/null || printf '')"
+}
+
 PM_PROBE_TIMEOUT=45
 PM_SWEEP_PARALLELISM=4
 PM_DEFAULT_TERMINAL="COMPLETED,SUCCEEDED,FAILED,CANCELLED,TIMEOUT,ERROR,CLOSED,ARCHIVED,DONE"
- 
 pm_now() {
     date +%s
 }
@@ -1303,6 +1327,8 @@ pm_sweep() {
     pm_sweep_count=0
     for pm_sweep_dir in "$PM_HOME"/watches/*; do
         [ -d "$pm_sweep_dir" ] || continue
+        [ -f "$pm_sweep_dir/spec" ] || continue
+        pm_is_graveyard "$pm_sweep_dir" && continue
         pm_sweep_watch "$pm_sweep_dir" &
         pm_sweep_pids="$pm_sweep_pids $!"
         pm_sweep_count=$((pm_sweep_count + 1))
@@ -1370,6 +1396,7 @@ pm_watch_main() {
     pwm_reason=""
     pwm_report_to="${PASEO_AGENT_ID:-}"
     pwm_provider=""
+    pwm_owner="${PASEO_AGENT_ID:-}"
     pwm_interval=""
     pwm_deadline=""
     pwm_terminal="$PM_DEFAULT_TERMINAL"
@@ -1528,6 +1555,7 @@ pm_watch_main() {
     fi
     pwm_spec="kind=$pwm_kind
 report_to=$pwm_report_to
+owner=$pwm_owner
 provider=$pwm_provider
 interval=$pwm_interval
 deadline=$pwm_deadline_epoch
@@ -1613,7 +1641,6 @@ labels=$pwm_labels"
     pwm_attempts=$(( (pwm_deadline_epoch - pwm_now + pwm_interval - 1) / pwm_interval ))
     printf 'watch %s registered: token=%s\n' "$pwm_id" "$PM_PARSED_TOKEN"
     printf 'delivery is best-effort; caller owns the liveness backstop\n'
-    printf 'will probe ≤ %s times before deadline (interval=%ss)\n' "$pwm_attempts" "$pwm_interval"
     if [ -f "$pwm_dir/failsafe" ]; then
         printf 'failsafe schedule=%s\n' "$(cat "$pwm_dir/failsafe")"
     else
@@ -1632,11 +1659,14 @@ pm_ls() {
     pm_init_state || return 1
     for pml_dir in "$PM_HOME"/watches/*; do
         [ -f "$pml_dir/spec" ] || continue
+        pm_is_graveyard "$pml_dir" && continue
         pml_id="$(basename "$pml_dir")"
-        printf '%s kind=%s target=%s state=%s nextDue=%s reason=%s\n' \
+        printf '%s kind=%s target=%s state=%s owner=%s report_to=%s ours=%s nextDue=%s reason=%s\n' \
             "$pml_id" "$(pm_spec_value kind "$pml_dir/spec")" \
             "$(pm_watch_target "$pml_dir")" \
             "$(cat "$pml_dir/state" 2>/dev/null || printf 'active')" \
+            "$(pm_watch_owner "$pml_dir")" "$(pm_spec_value report_to "$pml_dir/spec")" \
+            "$([ -n "${PASEO_AGENT_ID:-}" ] && [ "$(pm_spec_value owner "$pml_dir/spec")" = "$PASEO_AGENT_ID" ] && printf yes || printf no)" \
             "$(cat "$pml_dir/nextDue" 2>/dev/null || printf '')" \
             "$(pm_spec_value reason "$pml_dir/spec")"
     done
@@ -1646,6 +1676,7 @@ pm_status_one() {
     pso_dir="$1"
     pso_id="$(basename "$pso_dir")"
     pso_state="$(cat "$pso_dir/state" 2>/dev/null || printf 'active')"
+    pm_is_graveyard "$pso_dir" && pso_state=removed
     pso_health="$(cat "$pso_dir/health" 2>/dev/null || printf '0 none')"
     pso_health_count="${pso_health%% *}"
     pm_valid_uint "$pso_health_count" || pso_health_count=0
@@ -1669,11 +1700,14 @@ pm_status_one() {
     esac
     [ "$pso_undelivered" = yes ] && printf 'paseo-monitor: WARN watch=%s undelivered=yes\n' "$pso_id" >&2
     [ "$pso_health_count" -gt 0 ] && printf 'paseo-monitor: WARN watch=%s health=%s\n' "$pso_id" "$pso_health" >&2
-    printf 'watch=%s kind=%s target=%s state=%s health=%s\n' \
-        "$pso_id" "$(pm_spec_value kind "$pso_dir/spec")" "$(pm_watch_target "$pso_dir")" "$pso_state" "$pso_health"
+    printf 'watch=%s kind=%s target=%s state=%s owner=%s report_to=%s ours=%s health=%s\n' \
+        "$pso_id" "$(pm_spec_value kind "$pso_dir/spec")" "$(pm_watch_target "$pso_dir")" "$pso_state" \
+        "$(pm_watch_owner "$pso_dir")" "$(pm_spec_value report_to "$pso_dir/spec")" \
+        "$([ -n "${PASEO_AGENT_ID:-}" ] && [ "$(pm_spec_value owner "$pso_dir/spec")" = "$PASEO_AGENT_ID" ] && printf yes || printf no)" \
+        "$pso_health"
     printf 'last_token=%s last_transition=%s delivery_attempted=%s undelivered=%s fires=%s deadline=%s log=%s\n' \
         "$pso_last" "$pso_transition" "$pso_attempted" "$pso_undelivered" "$pso_fires" \
-        "$(pm_spec_value deadline "$pso_dir/spec")" "$pso_dir/log"
+        "$(pm_spec_value deadline "$pso_dir/spec")" "$PM_HOME/watches/$pso_id/log"
 }
 
 pm_status() {
@@ -1691,7 +1725,6 @@ pm_status() {
         printf 'last-sweep-age: unknown\n'
     fi
     [ "$#" -le 1 ] || {
-        printf 'paseo-monitor: status accepts at most one watch id\n' >&2
         return 2
     }
     if [ "$#" -gt 0 ]; then
@@ -1700,8 +1733,8 @@ pm_status() {
             printf 'paseo-monitor: invalid watch id: %s\n' "$pms_id" >&2
             return 2
         }
-        pms_dir="$PM_HOME/watches/$pms_id"
-        [ -f "$pms_dir/spec" ] || {
+        pms_dir="$(pm_watch_source "$pms_id" 2>/dev/null || printf '')"
+        [ -n "$pms_dir" ] || {
             printf 'paseo-monitor: watch not found: %s\n' "$1" >&2
             return 1
         }
@@ -1710,6 +1743,7 @@ pm_status() {
     fi
     for pms_dir in "$PM_HOME"/watches/*; do
         [ -f "$pms_dir/spec" ] || continue
+        pm_is_graveyard "$pms_dir" && continue
         pm_status_one "$pms_dir"
     done
 }
@@ -1746,6 +1780,7 @@ pm_log() {
         esac
     done
     plg_path="$PM_HOME/watches/$plg_id/log"
+    [ -f "$plg_path" ] || plg_path="$PM_HOME/graveyard/$plg_id/log"
     [ -f "$plg_path" ] || [ -f "$plg_path.1" ] || {
         printf 'paseo-monitor: log not found for watch: %s\n' "$plg_id" >&2
         return 1
@@ -1789,40 +1824,95 @@ pm_teardown_watch() {
     return 0
 }
 
+pm_archive_watch() {
+    # pm_archive_watch <live-watch-dir> -- retain all evidence and routing.
+    paw_dir="$1"
+    paw_id="$(basename "$paw_dir")"
+    paw_dest="$PM_HOME/graveyard/$paw_id"
+    [ ! -e "$paw_dest" ] || return 1
+    mv "$paw_dir" "$paw_dest" || return 1
+    pm_atomic_write "$paw_dest/graveyard" removed || return 1
+    ln -s "../graveyard/$paw_id" "$PM_HOME/watches/$paw_id" || return 1
+    return 0
+}
+
 pm_rm() {
     [ "$#" -eq 1 ] || {
-        printf 'paseo-monitor: rm needs <id> or --all\n' >&2
+        printf 'paseo-monitor: rm needs <id>, --all, or --all-agents\n' >&2
         return 2
     }
     pm_init_state || return 1
-    if [ "$1" = --all ]; then
-        prm_count=0
-        acquire_lock "$PM_HOME" || return 1
-        trap 'release_lock "$PM_HOME"' 0 1 2 3 15
-        for prm_dir in "$PM_HOME"/watches/*; do
-            [ -d "$prm_dir" ] || continue
-            pm_teardown_watch "$prm_dir"
-            rm -rf "$prm_dir"
-            prm_count=$((prm_count + 1))
-        done
-        printf 'removed %s watch(es)\n' "$prm_count"
-        return 0
-    fi
-    prm_id="$1"
+    prm_mode="$1"
+    case "$prm_mode" in
+        --all|--all-agents)
+            prm_count=0
+            prm_caller="${PASEO_AGENT_ID:-}"
+            if [ "$prm_mode" = --all ] && [ -z "$prm_caller" ]; then
+                printf 'paseo-monitor: refusing rm --all without PASEO_AGENT_ID; use --all-agents for global removal\n' >&2
+                return 1
+            fi
+            acquire_lock "$PM_HOME" || return 1
+            trap 'release_lock "$PM_HOME"' 0 1 2 3 15
+            if [ "$prm_mode" = --all-agents ]; then
+                for prm_dir in "$PM_HOME"/watches/*; do
+                    [ -f "$prm_dir/spec" ] || continue
+                    pm_is_graveyard "$prm_dir" && continue
+                    printf 'will-remove watch=%s owner=%s report_to=%s target=%s\n' \
+                        "$(basename "$prm_dir")" "$(pm_watch_owner "$prm_dir")" \
+                        "$(pm_spec_value report_to "$prm_dir/spec")" "$(pm_watch_target "$prm_dir")"
+                done
+            fi
+            for prm_dir in "$PM_HOME"/watches/*; do
+                [ -f "$prm_dir/spec" ] || continue
+                pm_is_graveyard "$prm_dir" && continue
+                prm_owner="$(pm_watch_owner_key "$prm_dir")"
+                [ "$prm_mode" = --all-agents ] || [ "$prm_owner" = "$prm_caller" ] || continue
+                prm_id="$(basename "$prm_dir")"
+                prm_report_to="$(pm_spec_value report_to "$prm_dir/spec")"
+                prm_target="$(pm_watch_target "$prm_dir")"
+                prm_owner_display="$(pm_watch_owner "$prm_dir")"
+                pm_teardown_watch "$prm_dir"
+                pm_archive_watch "$prm_dir" || {
+                    printf 'paseo-monitor: could not archive watch: %s\n' "$prm_id" >&2
+                    return 1
+                }
+                printf 'removed watch=%s owner=%s report_to=%s target=%s\n' \
+                    "$prm_id" "$prm_owner_display" "$prm_report_to" "$prm_target"
+                prm_count=$((prm_count + 1))
+            done
+            printf 'removed %s watch(es)\n' "$prm_count"
+            return 0
+            ;;
+    esac
+    prm_id="$prm_mode"
     pm_validate_watch_id "$prm_id" || {
         printf 'paseo-monitor: invalid watch id: %s\n' "$prm_id" >&2
         return 2
     }
     prm_dir="$PM_HOME/watches/$prm_id"
-    [ -d "$prm_dir" ] || {
+    [ -f "$prm_dir/spec" ] || {
         printf 'paseo-monitor: watch not found: %s\n' "$prm_id" >&2
+        return 1
+    }
+    prm_caller="${PASEO_AGENT_ID:-}"
+    prm_owner="$(pm_watch_owner_key "$prm_dir")"
+    [ "$prm_owner" = "$prm_caller" ] || {
+        printf 'paseo-monitor: refusing cross-owner deletion watch=%s owner=%s; use --all-agents for global removal\n' \
+            "$prm_id" "$(pm_watch_owner "$prm_dir")" >&2
         return 1
     }
     acquire_lock "$PM_HOME" || return 1
     trap 'release_lock "$PM_HOME"' 0 1 2 3 15
+    prm_report_to="$(pm_spec_value report_to "$prm_dir/spec")"
+    prm_target="$(pm_watch_target "$prm_dir")"
+    prm_owner_display="$(pm_watch_owner "$prm_dir")"
     pm_teardown_watch "$prm_dir"
-    rm -rf "$prm_dir"
-    printf 'removed watch %s\n' "$prm_id"
+    pm_archive_watch "$prm_dir" || {
+        printf 'paseo-monitor: could not archive watch: %s\n' "$prm_id" >&2
+        return 1
+    }
+    printf 'removed watch=%s owner=%s report_to=%s target=%s\n' \
+        "$prm_id" "$prm_owner_display" "$prm_report_to" "$prm_target"
 }
 
 pm_reap() {
@@ -1834,6 +1924,7 @@ pm_reap() {
     preap_count=0
     for preap_dir in "$PM_HOME"/watches/*; do
         [ -f "$preap_dir/spec" ] || continue
+        pm_is_graveyard "$preap_dir" && continue
         preap_state="$(cat "$preap_dir/state" 2>/dev/null || printf '')"
         case "$preap_state" in terminal|expired) ;; *) continue ;; esac
         preap_deadline="$(pm_spec_value deadline "$preap_dir/spec")"
@@ -1842,6 +1933,18 @@ pm_reap() {
         [ "$((preap_now - preap_deadline))" -ge "$preap_retention" ] || continue
         pm_clear_failsafe "$preap_dir" || :
         rm -rf "$preap_dir"
+        preap_count=$((preap_count + 1))
+    done
+    for preap_dir in "$PM_HOME"/graveyard/*; do
+        [ -d "$preap_dir" ] || continue
+        [ -f "$preap_dir/spec" ] || continue
+        preap_deadline="$(pm_spec_value deadline "$preap_dir/spec")"
+        pm_valid_uint "$preap_deadline" || continue
+        [ "$preap_now" -ge "$preap_deadline" ] || continue
+        [ "$((preap_now - preap_deadline))" -ge "$preap_retention" ] || continue
+        preap_id="$(basename "$preap_dir")"
+        rm -rf "$preap_dir"
+        rm -f "$PM_HOME/watches/$preap_id"
         preap_count=$((preap_count + 1))
     done
     printf 'reaped %s watch(es)\n' "$preap_count"

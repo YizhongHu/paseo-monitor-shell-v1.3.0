@@ -6,6 +6,7 @@ PASEO_MONITOR_LOG_MAX_BYTES=100000
 export PASEO_MONITOR_LOG_MAX_BYTES
 source_monitor
 unset PM_SOURCE_ONLY
+export PASEO_AGENT_ID=cli-test
 
 kinds="$($PMT_BIN kinds)"
 assert_grep "$PMT_REPO_ROOT/bin/paseo-monitor" 'file-exists | Absence / receipt pattern' "kinds file-exists absence row"
@@ -87,9 +88,9 @@ pm_atomic_write "$recent_dir/spec" "$(sed "s/^deadline=.*/deadline=$recent_deadl
 reap_out="$($PMT_BIN reap)"
 printf '%s\n' "$reap_out" > "$SANDBOX/reap"
 [ ! -d "$old_dir" ] || fail "long-expired watch retained"
-[ -d "$recent_dir" ] || fail "recent terminal watch reaped"
+[ -f "$recent_dir/spec" ] || fail "recent terminal watch reaped"
 $PMT_BIN rm "$recent_id" || fail "rm one failed"
-[ ! -d "$recent_dir" ] || fail "rm one retained watch"
+[ -f "$PM_HOME/graveyard/$recent_id/spec" ] || fail "rm one did not retain watch"
 $PMT_BIN rm --all || fail "rm all failed"
-[ ! -d "$watch_dir" ] || fail "rm all retained watch"
+[ -f "$PM_HOME/graveyard/$watch_id/spec" ] || fail "rm all did not retain watch"
 echo PASS: CLI kinds, ls, status, log, poke, rm, and reap
