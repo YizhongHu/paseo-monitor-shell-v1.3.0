@@ -68,6 +68,7 @@ Subcommands:
       [--with-reason] [--dwell <n-sweeps>] [--label k=v ...] \
       [--prohibit <text>] [--failsafe] [--max-fires <n>] \
       [--max-runs <n>] [--expires-in <duration>]
+      [--deliver paseo-queue|<command>]
       Register a bundled probe.
   watch --script <file> --reason "<why no kind fits>" \
       [--terminal TOK,TOK] [same common options as --kind]
