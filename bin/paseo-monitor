@@ -711,6 +711,7 @@ pm_run_registered_probe() {
     prp_pr="$(pm_spec_value pr "$prp_dir/spec")"
     prp_with_reason="$(pm_spec_value with_reason "$prp_dir/spec")"
     prp_helper="$(pm_spec_value helper "$prp_dir/spec")"
+    prp_python="$(pm_spec_value python "$prp_dir/spec")"
     case "$prp_kind" in
         script)
             pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$prp_out" "$prp_err" "$prp_dir/probe"
@@ -745,7 +746,7 @@ pm_run_registered_probe() {
                 "$prp_helper" task show "$prp_task" -F json --jq '{status: .status, nice_status: .nice_status, faults: .faults, fatal_error: .fatal_error, effective_bytes_per_second: .effective_bytes_per_second}'
             prp_rc=$?
             [ "$prp_rc" -eq 0 ] || return "$prp_rc"
-            prp_globus_line="$(python3 -c "$PM_PY_GLOBUS_PROBE" < "$prp_out" 2>>"$prp_err")" || return 1
+            prp_globus_line="$("$prp_python" -c "$PM_PY_GLOBUS_PROBE" < "$prp_out" 2>>"$prp_err")" || return 1
             printf '%s\n' "$prp_globus_line" > "$prp_out"
             return 0
             ;;
@@ -754,7 +755,7 @@ pm_run_registered_probe() {
                 "$prp_helper" inspect "$prp_agent" --json
             prp_rc=$?
             [ "$prp_rc" -eq 0 ] || return "$prp_rc"
-            prp_agent_line="$(python3 -c "$PM_PY_AGENT_PROBE" < "$prp_out" 2>>"$prp_err")" || return 1
+            prp_agent_line="$("$prp_python" -c "$PM_PY_AGENT_PROBE" < "$prp_out" 2>>"$prp_err")" || return 1
             printf '%s\n' "$prp_agent_line" > "$prp_out"
             return 0
             ;;
@@ -1265,6 +1266,7 @@ pm_watch_main() {
     pwm_deliver=""
     pwm_helper=""
     pwm_deliver_mode=""
+    pwm_python=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --kind) [ "$#" -ge 2 ] || { echo "paseo-monitor: --kind needs a value" >&2; return 2; }; pwm_kind="$2"; shift 2 ;;
@@ -1352,6 +1354,12 @@ pm_watch_main() {
         pm_resolve_binary "$pwm_deliver_name" || return 2
         pwm_deliver="$PM_RESOLVED_BINARY"
     fi
+    case "$pwm_kind" in
+        agent|globus)
+            pm_resolve_binary python3 || return 2
+            pwm_python="$PM_RESOLVED_BINARY"
+            ;;
+    esac
     pwm_floor="$(pm_kind_floor "$pwm_kind" "$pwm_host")"
     [ -n "$pwm_interval" ] || pwm_interval="$(pm_kind_default_interval "$pwm_kind" "$pwm_report_transitions" "$pwm_host")"
     pm_valid_uint "$pwm_interval" || { echo "paseo-monitor: interval must be an integer" >&2; return 2; }
@@ -1399,6 +1407,7 @@ expires_in=$pwm_expires_in
 max_fires=$pwm_max_fires
 deliver=$pwm_deliver
 deliver_mode=$pwm_deliver_mode
+python=$pwm_python
 helper=$pwm_helper
 reason=$pwm_reason
 script=$pwm_script

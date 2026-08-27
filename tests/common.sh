@@ -66,6 +66,18 @@ source_monitor() {
     . "$PMT_BIN"
 }
 
+pmt_sweep_minimal_path() {
+    # pmt_sweep_minimal_path -- exercise _sweep as launchd does.
+    pmt_saved_path="$PATH"
+    PATH=/usr/bin:/bin:/usr/sbin:/sbin
+    export PATH
+    "$PMT_BIN" _sweep
+    pmt_rc=$?
+    PATH="$pmt_saved_path"
+    export PATH
+    return "$pmt_rc"
+}
+
 json_agents() {
     cat > "$MOCK_DIR/agents.json"
 }
