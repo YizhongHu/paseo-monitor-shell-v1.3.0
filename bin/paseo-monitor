@@ -34,6 +34,8 @@ print("%s nice_status=%s faults=%s fatal_error=%s effective_bytes_per_second=%s"
     field("effective_bytes_per_second")))
 PY
 )"
+PM_PY_HARVEST_LABELS='import json,sys; d=json.load(sys.stdin); d=d[0] if isinstance(d,list) and d else d; labels=d.get("Labels",d.get("labels",{})) if isinstance(d,dict) else {}; labels=labels if isinstance(labels,dict) else {}; print("|".join("%s=%s" % (k,str(labels[k]).replace("|"," ").replace("\n"," ")) for k in ("role","job","item","lane") if k in labels and labels[k] is not None))'
+PM_PY_SCHEDULE_ID='import json,sys; d=json.load(sys.stdin); d=d if isinstance(d,dict) else {}; print(d.get("id",d.get("scheduleId",d.get("schedule_id",""))))'
 
 LC_ALL=C
 export LC_ALL
@@ -784,6 +786,65 @@ pm_deliver() {
     return 0
 }
 
+pm_harvest_labels() {
+    # pm_harvest_labels -- copy labels exposed by Paseo, then env fallbacks.
+    phl_labels=""
+    if [ -n "${PASEO_AGENT_ID:-}" ] && command -v paseo >/dev/null 2>&1; then
+        phl_json="$(paseo inspect "$PASEO_AGENT_ID" --json 2>/dev/null || printf '')"
+        [ -n "$phl_json" ] && phl_labels="$(printf '%s' "$phl_json" | python3 -c "$PM_PY_HARVEST_LABELS" 2>/dev/null || printf '')"
+    fi
+    [ -n "$phl_labels" ] || phl_labels="${PASEO_LABELS:-}"
+    [ -n "${PASEO_LABEL_ROLE:-}" ] && phl_labels="${phl_labels}${phl_labels:+|}role=$PASEO_LABEL_ROLE"
+    [ -n "${PASEO_LABEL_JOB:-}" ] && phl_labels="${phl_labels}${phl_labels:+|}job=$PASEO_LABEL_JOB"
+    [ -n "${PASEO_LABEL_ITEM:-}" ] && phl_labels="${phl_labels}${phl_labels:+|}item=$PASEO_LABEL_ITEM"
+    [ -n "${PASEO_LABEL_LANE:-}" ] && phl_labels="${phl_labels}${phl_labels:+|}lane=$PASEO_LABEL_LANE"
+    printf '%s\n' "$phl_labels"
+}
+
+pm_schedule_create() {
+    # pm_schedule_create <watch-dir> <every> <max-runs> <expires-in> <prompt>.
+    psc_dir="$1"
+    psc_every="$2"
+    psc_max_runs="$3"
+    psc_expires="$4"
+    psc_prompt="$5"
+    psc_out="$psc_dir/.failsafe.stdout"
+    psc_err="$psc_dir/.failsafe.stderr"
+    pm_run_with_timeout "$PM_PROBE_TIMEOUT" "$psc_out" "$psc_err" \
+        paseo schedule create "$psc_prompt" --every "$psc_every" \
+        --max-runs "$psc_max_runs" --expires-in "$psc_expires" --json
+    psc_rc=$?
+    if [ "$psc_rc" -ne 0 ]; then
+        [ -s "$psc_err" ] && cat "$psc_err" >&2
+        rm -f "$psc_out" "$psc_err"
+        return "$psc_rc"
+    fi
+    psc_id="$(python3 -c "$PM_PY_SCHEDULE_ID" < "$psc_out" 2>/dev/null || printf '')"
+    case "$psc_id" in
+        ''|*[!A-Za-z0-9._:-]*) psc_id="$(sed -n 's/.*\"id\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p' "$psc_out" | sed -n '1p')" ;;
+    esac
+    rm -f "$psc_out" "$psc_err"
+    [ -n "$psc_id" ] || return 1
+    pm_atomic_write "$psc_dir/failsafe" "$psc_id" || return 1
+    log_line "$psc_dir" FAILSAFE-CREATED "schedule=$psc_id every=$psc_every max-runs=$psc_max_runs expires-in=$psc_expires" || :
+    return 0
+}
+
+pm_clear_failsafe() {
+    # pm_clear_failsafe <watch-dir> -- remove the daemon schedule after delivery.
+    pcf_dir="$1"
+    [ -f "$pcf_dir/failsafe" ] || return 0
+    pcf_id="$(cat "$pcf_dir/failsafe" 2>/dev/null || printf '')"
+    [ -n "$pcf_id" ] || return 0
+    if paseo schedule delete "$pcf_id" >/dev/null 2>&1; then
+        rm -f "$pcf_dir/failsafe"
+        log_line "$pcf_dir" FAILSAFE-DELETED "schedule=$pcf_id" || :
+    else
+        log_line "$pcf_dir" FAILSAFE-DELETE-FAILED "schedule=$pcf_id" || :
+    fi
+    return 0
+}
+
 pm_report_value() {
     # pm_report_value <value> <bytes> -- cap untrusted envelope fields.
     printf '%s' "$1" | tr '\n' ' ' | cut -c1-"$2"
@@ -835,7 +896,7 @@ pm_report_event() {
     pre_watch="$(basename "$pre_dir")"
     pre_kind="$(pm_spec_value kind "$pre_dir/spec")"
     pre_target="$(pm_watch_target "$pre_dir")"
-    pre_prohibit="$(pm_report_value "$(pm_spec_value prohibit "$pre_dir/spec")" 256)"
+    pre_prohibit="$(pm_report_value "$(pm_spec_value prohibit "$pre_dir/spec")" 1024)"
     [ -n "$pre_prohibit" ] || pre_prohibit="(none)"
     pre_detail="$(pm_report_value "$pre_detail" 384)"
     pre_context="$(pm_report_value "$(cat "$pre_dir/context" 2>/dev/null)" 256)"
@@ -920,6 +981,7 @@ pm_sweep_watch() {
                         *) set_state "$psw_dir" active || : ;;
                     esac
                 fi
+                [ "$psw_state" = delivery-failed ] && case "$psw_pending" in *class=terminal*) pm_clear_failsafe "$psw_dir" ;; esac
                 log_line "$psw_dir" DELIVERY-RETRY "$(printf '%s' "$psw_pending" | cut -c1-256)" || :
                 psw_state="$(cat "$psw_dir/state" 2>/dev/null || printf 'active')"
             else
@@ -1001,7 +1063,10 @@ pm_sweep_watch() {
                         pm_report_event "$psw_dir" "$(pm_terminal_token "$psw_new" "$(pm_spec_value terminal "$psw_dir/spec")" && printf terminal || printf transition)" "$psw_old" "$psw_new" "$psw_detail" || :
                     fi
                     if pm_terminal_token "$psw_new" "$(pm_spec_value terminal "$psw_dir/spec")"; then
-                        [ -f "$psw_dir/undelivered" ] || set_state "$psw_dir" terminal || :
+                        if [ ! -f "$psw_dir/undelivered" ]; then
+                            set_state "$psw_dir" terminal || :
+                            pm_clear_failsafe "$psw_dir"
+                        fi
                     fi
                 fi
             fi
