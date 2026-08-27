@@ -2,6 +2,7 @@
 # paseo-monitor: stateless launchd-driven watcher for long-running work.
 # POSIX sh only; see AGENTS.md for the portability and disposability contract.
 set -u
+PM_VERSION=v1.2.0
 
 # External knobs are read exactly once here. Runtime code uses PM_* only.
 PM_HOME="${PASEO_MONITOR_HOME:-$HOME/.paseo-monitor}"
@@ -97,6 +98,8 @@ Subcommands:
       Run one stateless sweep; used by launchd.
   help | --help | -h
       Show this help message.
+  version | --version
+      Show the release version.
 
 State layout (under PASEO_MONITOR_HOME, default ~/.paseo-monitor):
   sweep.lock/                   global mkdir lock, with lock/pid inside
@@ -1879,6 +1882,9 @@ if [ "${PM_SOURCE_ONLY:-0}" -ne 1 ]; then
         exit 1
     fi
     case "${1:-help}" in
+        version|--version)
+            printf 'paseo-monitor %s\n' "$PM_VERSION"
+            ;;
         help|--help|-h)
             usage
             ;;
