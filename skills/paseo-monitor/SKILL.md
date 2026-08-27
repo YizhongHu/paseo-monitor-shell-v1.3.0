@@ -24,6 +24,19 @@ paseo-monitor watch --kind slurm --host cannon --job 24211558 --deadline +3600
 when `--deliver paseo-queue` is selected; registration itself only records the
 watch unless a delivery backend is configured.
 
+### Removal and fire-cap reports
+
+`rm <id>` or `rm --all` reports `class=cancelled` with
+`old=<last observed token>` and `new=CANCELLED` when the watch has never fired
+and is not terminal or expired. Removing a watch that already reported stays
+silent; terminal, expired, and parked watches have already reported. `reap`
+stays silent because it removes only terminal or expired watches.
+
+`--max-fires N` reports `class=exhausted` with `new=MAX-FIRES-REACHED` once the
+cap is reached, then reporting stops. Observation continues, and the watch log
+records every token change. These two classes are always reported and bypass
+`--report-on` and `--report-transitions`.
+
 ## Kind table
 
 The table below is also emitted by `paseo-monitor kinds` and `paseo-monitor

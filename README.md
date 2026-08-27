@@ -19,6 +19,15 @@ Optional delivery uses one direct-argv backend: `--deliver
 paseo-queue` pipes the report to `paseo-queue add <report-to>`, while
 `--deliver <command>` pipes it to an arbitrary executable. Delivery failures
 remain recorded in the watch for retry on the next sweep.
+Lifecycle reports are unconditional. `rm <id>` or `rm --all` reports
+`class=cancelled` with `old=<last observed token>` and `new=CANCELLED` when a
+watch has never fired and is not terminal or expired. Removing a watch that
+already reported stays silent; terminal, expired, and parked watches have
+already reported. `reap` stays silent because it removes only terminal or
+expired watches. `--max-fires N` reports `class=exhausted` with
+`new=MAX-FIRES-REACHED` once the cap is reached, then reporting stops while
+the watch log continues to record every token change. These reports bypass
+`--report-on` and `--report-transitions`.
 
 ```sh
 paseo-monitor watch --kind <kind> [kind args] --deadline <when> [options]
@@ -36,8 +45,8 @@ paseo-monitor _sweep
 `--deadline <when>` is required for every watch; malformed deadline values are rejected separately.
 
 Common watch options include `--report-transitions`, `--report-on TOK,TOK`,
-`--label k=v`, `--prohibit TEXT`, `--failsafe`, `--max-runs N`, and
-`--expires-in DURATION`. `--with-reason` is the Slurm reason-detail switch;
+`--label k=v`, `--prohibit TEXT`, `--failsafe`, `--max-fires N`, `--max-runs N`,
+and `--expires-in DURATION`. `--with-reason` is the Slurm reason-detail switch;
 reason tokens in `--report-on` derive it automatically. Slurm and PBS have
 120-second floors; their defaults are 600 seconds terminal-only and 300
 seconds when transitions are enabled. Other kind floors and defaults are

@@ -854,14 +854,31 @@ One contract, honoured identically by bundled probes and `--script`.
 
 ### Trigger semantics
 
-Three event classes, and the distinction matters:
+Five event classes, and the distinction matters:
 
 | Class | Reported |
 |---|---|
 | **Terminal** tokens | always |
 | **Health / deadline** events | always |
 | **Intermediate** transitions | **opt-in** via `--report-on` |
+| **`cancelled`** removal events | always |
+| **`exhausted`** max-fires events | always |
 
+`cancelled` is emitted by explicit `rm <id>` or `rm --all` only while a watch
+still owes a report: it has never fired and is not already terminal or expired.
+Its envelope carries `class=cancelled`, `old=<last observed token>`, and
+`new=CANCELLED`. Removing a watch that already reported is silent; terminal,
+expired, and parked watches have already reported, so announcing removal adds
+duplicate noise. `reap` stays silent because it only removes terminal or
+expired watches, never an active watch whose caller is still waiting. This
+closes the primary risk of unbounded silence without adding a second report to
+a caller who already has the outcome.
+
+`exhausted` is emitted once when a watch reaches `--max-fires`, with
+`new=MAX-FIRES-REACHED`; it announces that no further reports follow.
+Observation continues after exhaustion: the watch log still records every token
+change, so the evidence trail keeps no holes. Both classes are always reported
+and bypass `--report-on` / `--report-transitions`.
 `--report-on` is round-7's agent-kind parameter **generalized to every kind**.
 Two consequences worth stating precisely:
 
