@@ -1109,6 +1109,10 @@ pm_watch_main() {
     fi
     [ -n "$pwm_script" ] && pwm_kind=script
     case "$pwm_kind" in slurm|globus|agent|file-exists|git-ref|pr-merge|script) ;; *) echo "paseo-monitor: unknown kind: $pwm_kind" >&2; return 2 ;; esac
+    if [ "$pwm_kind" = pr-merge ]; then
+        pm_match_csv MERGED "$pwm_terminal" || pwm_terminal="${pwm_terminal},MERGED"
+        pm_match_csv CLOSED "$pwm_terminal" || pwm_terminal="${pwm_terminal},CLOSED"
+    fi
     if [ "$pwm_kind" = agent ] && [ -z "$pwm_report_on" ]; then
         pwm_report_on=BLOCKED-PERMISSION,CLOSED,ARCHIVED
         pwm_report_transitions=1

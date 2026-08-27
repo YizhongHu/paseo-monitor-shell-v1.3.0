@@ -39,6 +39,10 @@ The table below is also emitted by `paseo-monitor kinds` and `paseo-monitor
 | `pr-merge` | Pull request merge state | `--repo <owner/repo> --pr <number>` | 60s | 300s | `paseo-monitor watch --kind pr-merge --repo OWNER/REPO --pr 123` |
 | `script` | Custom executable | `--script <file> --reason "<why no kind fits>"` | 60s | 60s | `paseo-monitor watch --script ./probe.sh --reason "custom direct-argv check" --terminal DONE` |
 
+`pr-merge` treats both `MERGED` and `CLOSED` as terminal. `CLOSED` is an
+observed unmerged human-gate decision, so leaving it active would poll forever
+until the deadline instead of reporting the gate outcome.
+
 Examples:
 
 ```sh
