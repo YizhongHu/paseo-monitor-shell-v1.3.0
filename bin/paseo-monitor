@@ -2,7 +2,7 @@
 # paseo-monitor: stateless launchd-driven watcher for long-running work.
 # POSIX sh only; see AGENTS.md for the portability and disposability contract.
 set -u
-PM_VERSION=v1.2.0
+PM_VERSION="v1.3.0"
 
 # External knobs are read exactly once here. Runtime code uses PM_* only.
 PM_HOME="${PASEO_MONITOR_HOME:-$HOME/.paseo-monitor}"
