@@ -1,6 +1,9 @@
 # Paseo CLI observability: stopped state, attention fields, and permission rules
 
-**Issue:** [YizhongHu/paseo-monitor#1](https://github.com/YizhongHu/paseo-monitor/issues/1) — local upstream-ask draft.
+**Filed upstream:** [getpaseo/paseo#3960](https://github.com/getpaseo/paseo/issues/3960) on 2026-08-28.
+**Local tracking issue:** [YizhongHu/paseo-monitor#1](https://github.com/YizhongHu/paseo-monitor/issues/1) (closed; superseded by the upstream issue).
+
+> An earlier attempt concluded upstream filing was unavailable because `gh repo view getpaseo/paseo` reported `viewerPermission=READ`. That inference was wrong: on a public repository with issues enabled, read permission does not prevent opening an issue. Re-verified and filed.
 
 ## Ask
 
